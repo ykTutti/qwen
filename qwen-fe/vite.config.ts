@@ -13,6 +13,10 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
       },
+      allowedHosts: [
+        'www.tutti.xin',
+        'tutti.xin'
+      ]
     },
   };
 });
