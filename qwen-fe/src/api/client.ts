@@ -13,7 +13,8 @@ export class ApiError extends Error {
 function clientId() {
   let id = localStorage.getItem(CLIENT_KEY);
   if (!id) {
-    id = `c-${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+    const bytes = crypto.getRandomValues(new Uint8Array(12));
+    id = `c-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
     localStorage.setItem(CLIENT_KEY, id);
   }
   return id;
