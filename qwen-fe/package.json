@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "vite --mode online",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
