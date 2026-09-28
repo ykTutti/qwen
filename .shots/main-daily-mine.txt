@@ -1,0 +1,66 @@
+img 720,306 48x48 src:data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhl
+h1 774,311 196x38 "你好，我是千问" fs:28px fw:500 lh:38px c:rgb(13, 13, 13)
+div 465,394 760x112 bg:rgb(255, 255, 255) b:1px solid rgb(226, 226, 226) r:28px sh:rgba(0, 0, 0, 0.05) 0px 8px 16px -4px
+textarea 478,411 734x50 ph:向千问提问
+button 478,461 32x32 r:9999px
+svg 486,469 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-add
+button 518,461 80x32 r:9999px
+svg 526,469 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-flash
+span 546,470 28x14 "快速" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+svg 578,471 12x12 color:rgb(13, 13, 13) fill:#qwpcicon-downMini
+button 610,461 124x32 r:9999px
+svg 618,469 16x16 color:rgb(13, 13, 13) fill:#pcicon-agentMode
+span 638,470 56x14 "工作助理" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+em 698,469 28x16 "云端" fs:11px fw:400 lh:10px c:rgb(0, 17, 255) bg:rgb(229, 236, 255) r:4px
+button 746,461 91x32 r:9999px
+svg 754,469 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-video
+span 774,470 55x14 "AI生视频" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+button 849,461 90x32 r:9999px
+svg 857,469 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-PPT
+span 877,470 54x14 "PPT创作" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+button 951,461 77x32 r:9999px
+svg 959,469 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-aiPicture
+span 979,470 41x14 "AI生图" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+button 1040,461 64x32 r:9999px
+svg 1048,469 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-menu
+span 1068,470 28x14 "更多" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+button 1140,461 32x32 bg:rgba(13, 13, 13, 0.03) r:9999px
+svg 1148,469 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-mic
+button 1180,461 32x32 bg:rgb(204, 204, 204) r:9999px
+svg 1188,469 16x16 color:rgb(255, 255, 255) fill:#qwpcicon-sendChat
+button 528,583 6x6 bg:rgb(13, 13, 13) r:50%
+button 528,595 6x6 bg:rgb(13, 13, 13) r:50%
+button 528,607 6x6 bg:rgb(13, 13, 13) r:50%
+div 542,562 620x72 bg:rgb(247, 247, 249) b:1px solid rgba(13, 13, 13, 0.03) r:12px
+i 557,574 94x18 "技能专家套件" fs:8px fw:400 lh:normal c:rgb(0, 17, 255) bg:rgb(255, 255, 255) r:4px sh:rgba(31, 63, 191, 0.12) 0px 1px 4px 0px
+svg 563,579 8x8 color:rgb(0, 17, 255) fill:#pcicon-agentMode
+em 625,578 20x10 "10+" fs:8px fw:400 lh:normal c:rgb(0, 17, 255) bg:rgb(229, 236, 255) r:2px
+i 579,602 79x18 "专业数据连接器" fs:8px fw:400 lh:normal c:rgb(13, 13, 13) bg:rgb(255, 255, 255) r:4px sh:rgba(31, 63, 191, 0.12) 0px 1px 4px 0px
+svg 585,607 8x8 color:rgb(13, 13, 13) fill:#qwpcicon-connector
+div 699,578 338x20 "工作任务就交给千问工作助理" fs:14px fw:500 lh:20px c:rgb(13, 13, 13)
+div 699,602 338x16 "专业技能搭配行业数据连接器，助理选的好，当然下班早" fs:12px fw:400 lh:16px c:rgb(102, 102, 102)
+button 1053,582 88x32 "立即体验" fs:14px fw:400 lh:normal c:rgb(255, 255, 255) bg:rgb(13, 13, 13) r:9999px
+div 542,634 620x72 bg:rgb(247, 247, 249) b:1px solid rgba(13, 13, 13, 0.03) r:12px
+i 565,644 100x52 bg:rgb(255, 255, 255) r:6px
+b 570,649 4x4 bg:rgb(255, 97, 89) r:50%
+b 577,649 4x4 bg:rgb(255, 189, 46) r:50%
+b 584,649 4x4 bg:rgb(40, 201, 65) r:50%
+i 557,668 59x22 bg:rgb(29, 29, 31) r:11px
+svg 563,675 8x8 color:rgb(255, 255, 255) fill:#qwpcicon-close
+s 577,675 2x8 bg:rgb(255, 255, 255) r:1px
+s 581,673 2x12 bg:rgb(255, 255, 255) r:1px
+s 585,675 2x8 bg:rgb(255, 255, 255) r:1px
+s 589,673 2x12 bg:rgb(255, 255, 255) r:1px
+s 593,675 2x8 bg:rgb(255, 255, 255) r:1px
+svg 601,675 9x9 color:rgb(255, 255, 255) fill:
+div 699,650 310x20 "千问输入法 App 全新上线" fs:14px fw:500 lh:20px c:rgb(13, 13, 13)
+div 699,674 310x16 "最快 300 字/分，说话即成稿，支持 9 种方言，无广告" fs:12px fw:400 lh:16px c:rgb(102, 102, 102)
+button 1025,654 116x32 "立即下载体验" fs:14px fw:400 lh:normal c:rgb(255, 255, 255) bg:rgb(13, 13, 13) r:9999px
+div 542,706 620x72 bg:rgb(247, 247, 249) b:1px solid rgba(13, 13, 13, 0.03) r:12px
+div 699,722 310x20 "千问一键生成录音纪要" fs:14px fw:500 lh:20px c:rgb(13, 13, 13)
+div 699,746 310x16 "断网也能稳定录，纪要自动整理，重要内容一句不漏" fs:12px fw:400 lh:16px c:rgb(102, 102, 102)
+button 1025,726 116x32 "立即下载体验" fs:14px fw:400 lh:normal c:rgb(255, 255, 255) bg:rgb(13, 13, 13) r:9999px
+p 256,866 1178x28 "继续使用即表示您同意 和" fs:10px fw:400 lh:12px c:rgb(153, 153, 153)
+a 850,874 40x12 "用户协议" fs:10px fw:400 lh:12px c:rgb(153, 153, 153)
+a 908,874 40x12 "隐私政策" fs:10px fw:400 lh:12px c:rgb(153, 153, 153)
+PLACEHOLDER content:normal fs:16px c:rgba(13, 13, 13, 0.333) lh:26px 向千问提问

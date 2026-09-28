@@ -1,0 +1,42 @@
+img 689,306 48x48 src:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJAA
+h2 749,308 252x44 "千问，你的办公助理" fs:28px fw:500 lh:44px c:rgb(13, 13, 13)
+div 465,394 760x154 bg:rgba(13, 13, 13, 0.03) r:28px
+div 465,394 760x116 bg:rgb(255, 255, 255) b:1px solid rgb(226, 226, 226) r:28px sh:rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.05) 0px 8px 16px -4px
+p 486,413 718x22
+button 478,465 32x32 r:9999px
+svg 486,473 16x16 color:rgb(13, 13, 13) fill:
+button 518,465 80x32 r:9999px
+svg 526,473 16x16 color:rgb(13, 13, 13) fill:
+span 546,474 28x14 "云端" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+svg 578,475 12x12 color:rgb(102, 102, 102) fill:
+button 610,465 80x32 r:9999px
+svg 618,473 16x16 color:rgb(13, 13, 13) fill:
+span 638,474 28x14 "连接" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+svg 670,475 12x12 color:rgb(102, 102, 102) fill:
+button 702,465 80x32 r:9999px
+svg 710,473 16x16 color:rgb(13, 13, 13) fill:
+span 730,471 28x21 "技能" fs:14px fw:400 lh:21px c:rgb(13, 13, 13)
+svg 762,475 12x12 color:rgb(102, 102, 102) fill:
+button 1016,465 124x32 b:1px solid rgba(0, 0, 0, 0) r:9999px
+span 1025,471 90x20 "Qwen3.8-Max" fs:13px fw:400 lh:20px c:rgb(13, 13, 13)
+svg 1119,475 12x12 color:rgb(13, 13, 13) fill:
+div 1144,465 32x32 bg:rgba(13, 13, 13, 0.03) r:9999px
+svg 1152,473 16x16 color:rgb(13, 13, 13) fill:
+button 1180,465 32x32 bg:rgb(204, 204, 204) r:9999px
+svg 1188,473 16x16 color:rgb(255, 255, 255) fill:
+button 478,513 136x32 r:9999px
+svg 486,521 16x16 color:rgb(102, 102, 102) fill:
+span 506,519 84x20 "选择工作项目" fs:14px fw:400 lh:20px c:rgb(102, 102, 102)
+svg 594,523 12x12 color:rgb(102, 102, 102) fill:
+p 465,568 760x20 "从这里开始" fs:12px fw:400 lh:20px c:rgb(153, 153, 153)
+button 465,600 340x32 r:4px
+img 485,608 16x16 src:https://yes-file.uc.cn/file/1789561310674_18696190
+span 509,604 252x24 "拆解编程核心原理，开展零基础代码教学" fs:14px fw:400 lh:24px c:rgb(13, 13, 13)
+button 465,640 270x32 r:4px
+img 485,648 16x16 src:https://yes-file.uc.cn/file/1789561324084_16463215
+span 509,644 182x24 "去除图片水印，保留原图画质" fs:14px fw:400 lh:24px c:rgb(13, 13, 13)
+button 465,680 255x32 r:4px
+img 485,688 16x16 src:https://yes-file.uc.cn/file/1789561337781_21743597
+span 509,684 167x24 "创作无限流题材AI短剧剧本" fs:14px fw:400 lh:24px c:rgb(13, 13, 13)
+PLACEHOLDER content:none fs:14px c:rgb(13, 13, 13) lh:22px 
+PLACEHOLDER content:none fs:14px c:rgb(13, 13, 13) lh:22px 

@@ -1,0 +1,44 @@
+img 689,306 48x48 src:http://127.0.0.1:5173/src/assets/work-logo.png
+h1 749,308 252x44 "千问，你的办公助理" fs:28px fw:500 lh:44px c:rgb(13, 13, 13)
+div 465,394 760x154 bg:rgba(13, 13, 13, 0.03) r:28px
+div 465,394 760x116 bg:rgb(255, 255, 255) b:1px solid rgb(226, 226, 226) r:28px sh:rgba(0, 0, 0, 0.05) 0px 8px 16px -4px
+textarea 478,411 734x54 ph:今天一起做点什么？
+button 478,465 32x32 r:9999px
+svg 486,473 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-add
+button 518,465 80x32 r:9999px
+svg 526,473 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-cloud
+span 546,474 28x14 "云端" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+svg 578,475 12x12 color:rgb(102, 102, 102) fill:#qwpcicon-downMini
+button 610,465 80x32 r:9999px
+svg 618,473 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-connector
+span 638,474 28x14 "连接" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+svg 670,475 12x12 color:rgb(102, 102, 102) fill:#qwpcicon-downMini
+button 702,465 80x32 r:9999px
+svg 710,473 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-component
+span 730,474 28x14 "技能" fs:14px fw:400 lh:14px c:rgb(13, 13, 13)
+svg 762,475 12x12 color:rgb(102, 102, 102) fill:#qwpcicon-downMini
+button 1016,465 124x32 b:1px solid rgba(0, 0, 0, 0) r:9999px
+span 1025,471 90x20 "Qwen3.8-Max" fs:13px fw:400 lh:20px c:rgb(13, 13, 13)
+svg 1119,475 12x12 color:rgb(13, 13, 13) fill:#qwpcicon-downMini
+button 1144,465 32x32 bg:rgba(13, 13, 13, 0.03) r:9999px
+svg 1152,473 16x16 color:rgb(13, 13, 13) fill:#qwpcicon-mic
+button 1180,465 32x32 bg:rgb(204, 204, 204) r:9999px
+svg 1188,473 16x16 color:rgb(255, 255, 255) fill:#qwpcicon-sendChat
+button 478,513 136x32 r:9999px
+svg 486,521 16x16 color:rgb(102, 102, 102) fill:#qwpcicon-folder
+span 506,519 84x20 "选择工作项目" fs:14px fw:400 lh:20px c:rgb(102, 102, 102)
+svg 594,523 12x12 color:rgb(102, 102, 102) fill:#qwpcicon-downMini
+p 465,568 60x20 "从这里开始" fs:12px fw:400 lh:20px c:rgb(153, 153, 153)
+button 465,600 298x32 r:4px
+img 485,608 16x16 src:http://127.0.0.1:5173/src/assets/starters/webpage.
+span 509,604 210x24 "制作百花奖历届获奖作品展示网页" fs:14px fw:400 lh:24px c:rgb(13, 13, 13)
+button 465,640 340x32 r:4px
+img 485,648 16x16 src:http://127.0.0.1:5173/src/assets/starters/copywrit
+span 509,644 252x24 "根据产品介绍，提炼卖点并生成宣传文案" fs:14px fw:400 lh:24px c:rgb(13, 13, 13)
+button 465,680 368x32 r:4px
+img 485,688 16x16 src:http://127.0.0.1:5173/src/assets/starters/market.s
+span 509,684 280x24 "分析板块资金动向，判断市场热点和行业趋势" fs:14px fw:400 lh:24px c:rgb(13, 13, 13)
+p 256,866 1178x28 "继续使用即表示您同意 和" fs:10px fw:400 lh:12px c:rgb(153, 153, 153)
+a 850,874 40x12 "用户协议" fs:10px fw:400 lh:12px c:rgb(153, 153, 153)
+a 908,874 40x12 "隐私政策" fs:10px fw:400 lh:12px c:rgb(153, 153, 153)
+PLACEHOLDER content:normal fs:14px c:rgba(13, 13, 13, 0.333) lh:22px 今天一起做点什么？
