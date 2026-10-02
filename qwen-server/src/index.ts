@@ -4,9 +4,15 @@ import cors from 'cors';
 import { appConfig, mockSources } from './data/config.js';
 import { getWorkspace, guestOwner, login, logout, newId, userByToken, type Workspace } from './store.js';
 import { buildHistory, forgetTrace, runAgent } from './agent/loop.js';
-import { LlmError } from './llm/deepseek.js';
+import { readDesign } from './agent/tools/design.js';
+import { outputFilePath, readOutputFile } from './agent/tools/files.js';
+import { DESIGN_SKILL, getSkill, listSkills } from './skills.js';
+import { forgetPreview, previewKey, servePreview } from './preview.js';
+import { disposeSession } from './agent/tools/sandbox.js';
+import { sessionFor } from './agent/tools/workspace.js';
+import { LlmError, resolveModel } from './llm/client.js';
 import { buildKeywords, buildReply, buildThinking, defaultHistory, genTitle, needSearch, snippetOf } from './reply.js';
-import type { ChatMode, Conversation, Message, Surface, User } from './types.js';
+import { isWorkLike, type ChatMode, type Conversation, type Message, type Surface, type User } from './types.js';
 
 const PORT = env.port;
 const ID_RE = /^[\w-]{4,48}$/;
@@ -55,7 +61,7 @@ function findConv(ws: Workspace, id: string) {
   return conv;
 }
 
-const publicConv = ({ temporary: _t, ...c }: Conversation) => c;
+const publicConv = ({ temporary: _t, sandboxId: _s, ...c }: Conversation) => c;
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
@@ -68,6 +74,8 @@ app.post('/api/auth/login', (req, res) => {
   const clientId = req.header('x-client-id');
   res.json(login(String(account).trim(), clientId && ID_RE.test(clientId) ? clientId : undefined));
 });
+
+app.get('/api/preview/:key/*', servePreview);
 
 app.use('/api', identify);
 
@@ -90,6 +98,57 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   const conv = findConv(req.ws, req.params.id);
   req.ws.messages[conv.id] ??= defaultHistory(conv);
   res.json(req.ws.messages[conv.id]);
+});
+
+app.get('/api/skills', (_req, res, next) => {
+  listSkills().then((skills) => res.json(skills), next);
+});
+
+app.get('/api/conversations/:id/files', (req, res, next) => {
+  (async () => {
+    const conv = findConv(req.ws, req.params.id);
+    const filePath = String(req.query.path ?? '');
+    if (!conv.sandboxId || !filePath) throw new HttpError(404, '文件不存在');
+    let result;
+    try {
+      result = await readOutputFile(sessionFor(conv.sandboxId), filePath);
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : '读取文件失败');
+    }
+    if (!result) throw new HttpError(404, '文件不存在或已被删除');
+    res.json(result);
+  })().catch(next);
+});
+
+app.get('/api/conversations/:id/design', (req, res, next) => {
+  (async () => {
+    const conv = findConv(req.ws, req.params.id);
+    const current = conv.sandboxId ? await readDesign(sessionFor(conv.sandboxId)) : undefined;
+    if (!current) throw new HttpError(404, '还没有设计画布');
+    res.json(current.design);
+  })().catch(next);
+});
+
+app.get('/api/conversations/:id/preview', (req, res) => {
+  const conv = findConv(req.ws, req.params.id);
+  if (!conv.sandboxId) throw new HttpError(404, '对话没有工作区');
+  res.json({ key: previewKey(conv.sandboxId) });
+});
+
+app.get('/api/conversations/:id/files/download', (req, res, next) => {
+  (async () => {
+    const conv = findConv(req.ws, req.params.id);
+    const filePath = String(req.query.path ?? '');
+    if (!conv.sandboxId || !filePath) throw new HttpError(404, '文件不存在');
+    let found;
+    try {
+      found = await outputFilePath(sessionFor(conv.sandboxId), filePath);
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : '读取文件失败');
+    }
+    if (!found) throw new HttpError(404, '文件不存在或已被删除');
+    res.download(found.abs, found.file.name);
+  })().catch(next);
 });
 
 app.patch('/api/conversations/:id', (req, res) => {
@@ -119,6 +178,10 @@ app.delete('/api/conversations/:id', (req, res) => {
   req.ws.conversations = req.ws.conversations.filter((c) => c !== conv);
   req.ws.messages[conv.id]?.forEach((m) => forgetTrace(m.id));
   delete req.ws.messages[conv.id];
+  if (conv.sandboxId) {
+    forgetPreview(conv.sandboxId);
+    disposeSession(sessionFor(conv.sandboxId)).catch((err) => console.error(err));
+  }
   res.json({ ok: true });
 });
 
@@ -177,7 +240,7 @@ async function chat(req: Request, res: Response) {
         id: ID_RE.test(convId) ? convId : newId('n-'),
         title: genTitle(prompt),
         updatedAt: Date.now(),
-        surface: (body.surface === 'work' ? 'work' : 'daily') as Surface,
+        surface: (['work', 'design'].includes(body.surface) ? body.surface : 'daily') as Surface,
         temporary: !!body.temporary,
       };
       ws.conversations.unshift(conv);
@@ -213,16 +276,27 @@ async function chat(req: Request, res: Response) {
     if (!closed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  if (model === 'deepseek') assistant.blocks = [];
+  const target = resolveModel(model);
+  if (target) assistant.blocks = [];
   send('start', { conversation: publicConv(conv), userMessage, assistantMessage: assistant });
 
-  if (model === 'deepseek') {
+  if (target) {
     const ctrl = new AbortController();
     res.on('close', () => ctrl.abort());
+    if (isWorkLike(conv.surface)) conv.sandboxId ??= newId('sbx_');
+    // A skill picked for one message stays active for the rest of the conversation, until another one is picked.
+    // Design mode always runs its dedicated skill; work mode uses whatever the user picked.
+    const picked = conv.surface === 'work' ? [...ws.messages[conv.id]].reverse().find((m) => m.role === 'user' && m.skill)?.skill : undefined;
+    const skillName = conv.surface === 'design' ? DESIGN_SKILL : picked === DESIGN_SKILL ? undefined : picked;
+    const agentSkill = skillName ? await getSkill(skillName) : undefined;
     try {
       await runAgent({
         assistant,
         history: buildHistory(ws.messages[conv.id].slice(0, -1)),
+        surface: conv.surface,
+        target,
+        session: conv.sandboxId ? sessionFor(conv.sandboxId) : undefined,
+        skill: agentSkill,
         thinking: mode === 'research',
         signal: ctrl.signal,
         emit: (event, data) => {

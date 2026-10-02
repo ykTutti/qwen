@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { starterIcon, useConfig } from '../config';
-import type { Promo, Surface, ToastFn } from '../types';
+import { isWorkLike, type Promo, type Surface, type ToastFn } from '../types';
 import { Icon, LogoMark } from './Icon';
 import workLogo from '../assets/work-logo.png';
 import promoAgent from '../assets/promos/agent.png';
@@ -18,17 +18,18 @@ interface Props {
 }
 
 export function Home({ surface, skill, temporary, composer, onSkill, onPrompt, toast }: Props) {
-  const { imageExamples, pptTemplates, skills, workStarters } = useConfig();
+  const { imageExamples, pptTemplates, skills, workStarters, designStarters } = useConfig();
   const s = skills.find((x) => x.key === skill);
-  const [starters] = useState(() => [...workStarters].sort(() => Math.random() - 0.5).slice(0, 3));
+  const pool = surface === 'design' ? (designStarters ?? workStarters) : workStarters;
+  const starters = useMemo(() => [...pool].sort(() => Math.random() - 0.5).slice(0, 3), [pool]);
 
-  if (surface === 'work') {
+  if (isWorkLike(surface)) {
     return (
       <div className="home is-work">
         <div className="home-center">
           <div className="hero is-work">
             <img src={workLogo} width={48} height={48} alt="" />
-            <h1>千问，你的办公助理</h1>
+            <h1>{surface === 'design' ? '千问，你的设计助理' : '千问，你的办公助理'}</h1>
           </div>
           <div className="project-tray">
             {composer}

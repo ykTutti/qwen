@@ -12,6 +12,7 @@ export const workModels: ModelOption[] = [
   { key: 'qwen3.8-flash', name: 'Qwen3.8-Flash', desc: '极速响应' },
   { key: 'qwen3.7-max', name: 'Qwen3.7-Max', desc: '擅长代码编写，处理复杂任务' },
   { key: 'qwen3.7-plus', name: 'Qwen3.7-Plus', desc: '均衡速度与效果' },
+  { key: 'deepseek', name: 'DeepSeek', desc: '支持联网搜索，实时获取最新信息' },
 ];
 
 export const modes = [
@@ -86,6 +87,15 @@ export const workStarters = [
   { text: '制作百花奖历届获奖作品展示网页', icon: 'webpage' },
 ];
 
+export const designStarters = [
+  { text: '做一个番茄钟 App 的可交互原型，包含计时、统计和设置页', icon: 'webpage' },
+  { text: '为一款宠物社交 App 发散 5 个差异化的产品方向', icon: 'research' },
+  { text: '把「社区二手书交换」的想法做成一个落地页原型', icon: 'webpage' },
+  { text: '给记账 App 的新手引导设计 3 套不同的交互方案', icon: 'copywriting' },
+  { text: '设计一个团队周报看板，用卡片和图表展示进度', icon: 'market' },
+  { text: '为线下咖啡店会员小程序梳理核心流程并出原型', icon: 'resume' },
+];
+
 export const pptTemplates = [
   { name: '商务汇报', from: '#3a6df0', to: '#8fb3ff' },
   { name: '年终总结', from: '#e8524a', to: '#ffb199' },
@@ -122,6 +132,7 @@ export const appConfig = {
   plusMenu,
   promos,
   workStarters,
+  designStarters,
   pptTemplates,
   imageExamples,
 };

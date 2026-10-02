@@ -1,4 +1,4 @@
-import type { Surface, ToastFn } from '../types';
+import { isWorkLike, type Surface, type ToastFn } from '../types';
 import { useConfig } from '../config';
 import subscribeIcon from '../assets/subscribe-light.png';
 
@@ -67,7 +67,7 @@ export function TopBar(props: Props) {
       </div>
 
       <div className="topbar-right">
-        {props.loggedIn && props.surface === 'work' ? (
+        {props.loggedIn && isWorkLike(props.surface) ? (
           <>
             <button className="btn-subscribe" onClick={() => props.toast('订阅会员（mock）')}>
               <img src={subscribeIcon} width={16} height={16} alt="" draggable={false} />

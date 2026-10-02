@@ -1,4 +1,4 @@
-import type { AgentBlock, AppConfig, ChatMode, CloudSpaceItem, Conversation, Message, SearchHit, SearchSource, Surface, User } from '../types';
+import type { AgentBlock, AgentSkill, AppConfig, ChatMode, CloudSpaceItem, Conversation, DesignDoc, Message, OutputFile, SearchHit, SearchSource, Surface, User } from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE ?? '/api';
 const TOKEN_KEY = 'qw-token';
@@ -49,6 +49,30 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+/** Raw bytes of a file in the conversation's work dir; fetched with auth headers, since a plain link can't send them. */
+export async function fetchOutputFile(conversationId: string, path: string): Promise<Blob> {
+  const res = await fetch(
+    `${BASE}/conversations/${encodeURIComponent(conversationId)}/files/download?path=${encodeURIComponent(path)}`,
+    { headers: headers() },
+  ).catch(() => {
+    throw new ApiError(0, '网络异常，请检查服务是否已启动');
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data?.message ?? `下载失败（${res.status}）`);
+  }
+  return res.blob();
+}
+
+export async function downloadOutputFile(conversationId: string, path: string, name: string) {
+  const url = URL.createObjectURL(await fetchOutputFile(conversationId, path));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const api = {
   config: () => request<AppConfig>('/config'),
   login: (account: string, password: string) =>
@@ -67,7 +91,25 @@ export const api = {
   deleteConversation: (id: string) => request<{ ok: true }>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   searchHistory: (q: string) => request<SearchHit[]>(`/search?tab=history&q=${encodeURIComponent(q)}`),
   searchCloud: (q: string) => request<CloudSpaceItem[]>(`/search?tab=cloud&q=${encodeURIComponent(q)}`),
+  skills: () => request<AgentSkill[]>('/skills'),
+  outputFile: (conversationId: string, path: string) =>
+    request<{ file: OutputFile; content: string }>(
+      `/conversations/${encodeURIComponent(conversationId)}/files?path=${encodeURIComponent(path)}`,
+    ),
+  /** URL serving a work-dir file so relative links (shared CSS/JS, other pages) resolve inside the preview iframe. */
+  previewUrl: async (conversationId: string, path: string) => {
+    let key = previewKeys.get(conversationId);
+    if (!key) {
+      key = request<{ key: string }>(`/conversations/${encodeURIComponent(conversationId)}/preview`).then((d) => d.key);
+      previewKeys.set(conversationId, key);
+      key.catch(() => previewKeys.delete(conversationId));
+    }
+    return `${BASE}/preview/${await key}/${path.split('/').map(encodeURIComponent).join('/')}`;
+  },
+  design: (conversationId: string) => request<DesignDoc>(`/conversations/${encodeURIComponent(conversationId)}/design`),
 };
+
+const previewKeys = new Map<string, Promise<string>>();
 
 export interface ChatRequest {
   conversationId: string;
@@ -89,6 +131,9 @@ export interface ChatHandlers {
   onChunk: (fullText: string) => void;
   /** Agent answers stream as ordered blocks: reasoning, tool calls with results, and answer text. */
   onBlocks?: (blocks: AgentBlock[], fullText: string) => void;
+  /** Files the agent produced this turn, sent once just before `done`. */
+  onFiles?: (files: OutputFile[]) => void;
+  onDesign?: (design: DesignDoc) => void;
   onDone: () => void;
   onError: (err: Error) => void;
 }
@@ -138,6 +183,10 @@ export function streamChat(body: ChatRequest, handlers: ChatHandlers) {
         } else if (event === 'reasoning' || event === 'tool_call' || event === 'tool_result') {
           blocks = applyAgentEvent(blocks ?? (content ? [{ type: 'text', text: content }] : []), event, data);
           handlers.onBlocks?.(blocks, content);
+        } else if (event === 'files') {
+          handlers.onFiles?.(data.files);
+        } else if (event === 'design') {
+          handlers.onDesign?.(data.design);
         } else if (event === 'error') {
           finished = true;
           throw new ApiError(0, data.message ?? '回答失败，请重试');

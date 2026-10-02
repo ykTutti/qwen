@@ -1,8 +1,21 @@
+import { isWorkLike, type Surface } from '../../types.js';
+import { updateDesignTool } from './design.js';
+import { fileTools } from './files.js';
+import { saveSkillTool } from './skills.js';
+import { subagentTool } from './subagent.js';
+import { terminalTools } from './terminal.js';
 import type { AgentTool } from './types.js';
 import { webSearchTool } from './webSearch.js';
 
-export const tools: AgentTool<any>[] = [webSearchTool];
+const dailyTools: AgentTool<any>[] = [webSearchTool];
+const designTools: AgentTool<any>[] = [webSearchTool, ...fileTools, ...terminalTools, updateDesignTool, subagentTool];
+const workTools: AgentTool<any>[] = [webSearchTool, ...fileTools, ...terminalTools, saveSkillTool];
 
-export const toolMap = new Map(tools.map((t) => [t.definition.function.name, t]));
-
-export const toolDefinitions = tools.map((t) => t.definition);
+/** Local file and shell tools are only offered in work and design mode; skills are work-only, sub-agents design-only. */
+export function toolsFor(surface: Surface) {
+  const tools = surface === 'work' ? workTools : isWorkLike(surface) ? designTools : dailyTools;
+  return {
+    definitions: tools.map((t) => t.definition),
+    map: new Map(tools.map((t) => [t.definition.function.name, t])),
+  };
+}

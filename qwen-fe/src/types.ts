@@ -1,5 +1,8 @@
 export type Role = 'user' | 'assistant';
-export type Surface = 'daily' | 'work';
+export type Surface = 'daily' | 'work' | 'design';
+
+/** Surfaces that run the agent with work dir, terminal and skills; design behaves like work for now. */
+export const isWorkLike = (s: Surface) => s !== 'daily';
 export type ChatMode = 'fast' | 'research';
 
 export interface SearchSource {
@@ -21,10 +24,52 @@ export type AgentBlock =
       args: string;
       status: ToolStatus;
       results?: SearchSource[];
+      summary?: string;
+      output?: string;
       error?: string;
       startedAt?: number;
       endedAt?: number;
     };
+
+/** A work-mode skill loaded from the server's skills directory. */
+export interface AgentSkill {
+  name: string;
+  title: string;
+  description: string;
+  source: 'builtin' | 'custom';
+  hidden: boolean;
+  updatedAt: number;
+}
+
+/** A file the agent produced in its work dir, shown as a card at the end of the reply. */
+export interface OutputFile {
+  path: string;
+  name: string;
+  size: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** design.json: the design-mode prototype as a graph of pages (canvas nodes) and navigations (edges). */
+export interface DesignPage {
+  id: string;
+  name: string;
+  description?: string;
+  agentId?: string;
+  html: string | null;
+  status: 'pending' | 'done';
+  updatedAt?: number;
+}
+
+export interface DesignDoc {
+  title: string;
+  platform: 'mobile' | 'desktop';
+  viewport: { width: number; height: number };
+  pages: DesignPage[];
+  edges: { from: string; to: string; label?: string }[];
+}
+
+export const DESIGN_FILE = 'design.json';
 
 export interface Message {
   id: string;
@@ -34,6 +79,7 @@ export interface Message {
   keywords?: string[];
   sources?: SearchSource[];
   blocks?: AgentBlock[];
+  files?: OutputFile[];
   attachments?: string[];
   skill?: string;
   status?: 'pending' | 'analyzing' | 'streaming' | 'done' | 'stopped';
@@ -106,6 +152,7 @@ export interface AppConfig {
   plusMenu: PlusMenuItem[];
   promos: Promo[];
   workStarters: { text: string; icon: string }[];
+  designStarters?: { text: string; icon: string }[];
   pptTemplates: { name: string; from: string; to: string }[];
   imageExamples: string[];
 }

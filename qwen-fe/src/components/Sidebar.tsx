@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Conversation, Surface, User, ToastFn } from '../types';
 import { Icon, Wordmark } from './Icon';
 import { Popover } from './Popover';
+
+const SURFACES: { key: Surface; label: string }[] = [
+  { key: 'daily', label: '日常' },
+  { key: 'work', label: '工作' },
+  { key: 'design', label: '设计' },
+];
 
 interface Props {
   collapsed: boolean;
@@ -24,6 +30,8 @@ interface Props {
   onLogin: () => void;
   onLogout: () => void;
   onSearch: () => void;
+  skillsOpen: boolean;
+  onSkills: () => void;
   toast: ToastFn;
 }
 
@@ -48,7 +56,7 @@ export function Sidebar(props: Props) {
         { icon: 'aiVideo', label: '千问创作', external: true },
       ]
     : [
-        { icon: 'component', label: '技能' },
+        ...(surface === 'work' ? [{ icon: 'component', label: '技能', onClick: props.onSkills, current: props.skillsOpen }] : []),
         { icon: 'connector', label: '连接' },
         { icon: 'folder', label: '项目' },
         { icon: 'personalComputer', label: '本地工作助理' },
@@ -71,15 +79,17 @@ export function Sidebar(props: Props) {
       </div>
 
       <div className="surface-switch">
-        <div className="segmented">
-          <button className={daily ? 'is-active' : ''} onClick={() => props.onSurface('daily')}>日常</button>
-          <button className={!daily ? 'is-active' : ''} onClick={() => props.onSurface('work')}>工作</button>
+        <div className="segmented" style={{ '--count': SURFACES.length, '--index': SURFACES.findIndex((s) => s.key === surface) } as CSSProperties}>
+          <span className="segmented-thumb" aria-hidden="true" />
+          {SURFACES.map((s) => (
+            <button key={s.key} className={surface === s.key ? 'is-active' : ''} onClick={() => props.onSurface(s.key)}>{s.label}</button>
+          ))}
         </div>
       </div>
 
       <div className={`sidebar-scroll ${daily ? '' : 'is-work'}`}>
         <div className="side-row-wrap">
-          <button className={`side-row ${!activeId && !props.temporary ? 'is-current' : ''}`} onClick={props.onNew}>
+          <button className={`side-row ${!activeId && !props.temporary && !props.skillsOpen ? 'is-current' : ''}`} onClick={props.onNew}>
             <Icon name="add" />
             <span>{daily ? '新对话' : '新任务'}</span>
           </button>
@@ -95,7 +105,11 @@ export function Sidebar(props: Props) {
         </div>
 
         {navs.map((n) => (
-          <button key={n.label} className="side-row" onClick={() => props.toast(`${n.label}（mock 功能）`)}>
+          <button
+            key={n.label}
+            className={`side-row ${'current' in n && n.current ? 'is-current' : ''}`}
+            onClick={'onClick' in n && n.onClick ? n.onClick : () => props.toast(`${n.label}（mock 功能）`)}
+          >
             <Icon name={n.icon} />
             <span>{n.label}</span>
             {'external' in n && n.external && <Icon name="arrowRightUp2" size={16} className="side-row-tail" />}
@@ -123,7 +137,7 @@ export function Sidebar(props: Props) {
               {list.map((c) => (
                 <div
                   key={c.id}
-                  className={`history-item ${c.id === activeId ? 'is-active' : ''}`}
+                  className={`history-item ${c.id === activeId && !props.skillsOpen ? 'is-active' : ''}`}
                   onClick={() => editingId !== c.id && props.onSelect(c.id)}
                 >
                   {editingId === c.id ? (

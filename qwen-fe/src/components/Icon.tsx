@@ -22,6 +22,8 @@ const linePaths: Record<string, string> = {
   dislike: 'M17 13V4h3v9zM17 13l-4 7a2 2 0 0 1-3-2l1-4H5a2 2 0 0 1-2-2.3l1.3-6A2 2 0 0 1 6.3 4H17',
   arrowDown: 'M12 5v14M6 13l6 6 6-6',
   download: 'M12 4v11M7 10l5 5 5-5M4 20h16',
+  code: 'M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 4l-3 16',
+  collapse: 'M10 4v6H4M14 20v-6h6',
   stop: 'M8 8h8v8H8z',
   logout: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10',
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0',

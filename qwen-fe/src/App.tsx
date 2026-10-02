@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChatMode, Conversation, Message, Surface, ToastFn, ToastType, User } from './types';
+import { DESIGN_FILE, isWorkLike, type ChatMode, type Conversation, type DesignDoc, type Message, type OutputFile, type Surface, type ToastFn, type ToastType, type User } from './types';
 import { api, ApiError, streamChat, tokenStore, type ChatRequest } from './api/client';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { Home } from './components/Home';
 import { MessageList } from './components/MessageList';
+import { FilePanel } from './components/FilePanel';
+import { SkillsPage } from './components/SkillsPage';
+import { SKILL_CREATOR, refreshSkills } from './skills';
 import { Composer, type ComposerHandle } from './components/Composer';
 import { LoginModal } from './components/LoginModal';
 import { SearchModal } from './components/SearchModal';
@@ -34,12 +37,19 @@ export default function App() {
   const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({});
   const [msgLoading, setMsgLoading] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
-  const { models } = useConfig();
+  const { models, workModels } = useConfig();
   const [model, setModel] = useStoredState('qw-model', (v) => models.some((m) => m.key === v), models[0].key);
+  const [workModel, setWorkModel] = useStoredState('qw-work-model', (v) => workModels.some((m) => m.key === v), workModels[0].key);
+  const chatModel = isWorkLike(surface) ? workModel : model;
   const [mode, setMode] = useStoredState<ChatMode>('qw-mode', (v): v is ChatMode => v === 'fast' || v === 'research', 'fast');
   const [skill, setSkill] = useState<string | undefined>();
   const [temporary, setTemporary] = useState(false);
   const [toastState, setToastState] = useState<{ text: string; type?: ToastType; key: number } | null>(null);
+  const [panel, setPanel] = useState<{ conversationId: string; file: OutputFile } | null>(null);
+  /** Latest design.json per conversation, pushed live while the design agent works. */
+  const [designs, setDesigns] = useState<Record<string, DesignDoc>>({});
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const closePanel = useCallback(() => setPanel(null), []);
 
   const cancelRef = useRef<(() => void) | null>(null);
   const composerRef = useRef<ComposerHandle>(null);
@@ -98,6 +108,7 @@ export default function App() {
     setActiveId(null);
     setSkill(undefined);
     setTemporary(false);
+    setSkillsOpen(false);
     closeOnMobile();
     requestAnimationFrame(() => composerRef.current?.focus());
   }, []);
@@ -119,10 +130,12 @@ export default function App() {
     setActiveId(null);
     setSkill(undefined);
     setTemporary(false);
+    setSkillsOpen(false);
   };
 
   const selectConv = async (id: string) => {
     closeOnMobile();
+    setSkillsOpen(false);
     if (id === activeId) return;
     setActiveId(id);
     setSkill(undefined);
@@ -154,6 +167,8 @@ export default function App() {
     setMessagesMap((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), assistant] }));
     setStreamingId(convId);
 
+    let savedSkill = false;
+    let canvasOpened = false;
     const finish = () => {
       setStreamingId((cur) => (cur === convId ? null : cur));
       cancelRef.current = null;
@@ -168,9 +183,35 @@ export default function App() {
         },
         onAnalyzing: (meta) => updateMsg(convId, aid, { ...meta, status: 'analyzing' }),
         onChunk: (c) => updateMsg(convId, aid, { content: c, status: 'streaming' }),
-        onBlocks: (blocks, c) => updateMsg(convId, aid, { blocks, content: c, status: 'streaming' }),
+        onBlocks: (blocks, c) => {
+          updateMsg(convId, aid, { blocks, content: c, status: 'streaming' });
+          if (blocks.some((b) => b.type === 'tool' && b.name === 'save_skill' && b.status === 'done')) savedSkill = true;
+        },
+        onFiles: (files) => {
+          updateMsg(convId, aid, { files });
+          // Pages edited after they were registered keep their design.json stamp; bump it so their iframes reload.
+          setDesigns((prev) => {
+            const d = prev[convId];
+            if (!d) return prev;
+            const stamps = new Map(files.map((f) => [f.path, f.updatedAt]));
+            const pages = d.pages.map((p) => {
+              const t = p.html ? stamps.get(p.html) : undefined;
+              return t && t > (p.updatedAt ?? 0) ? { ...p, updatedAt: t } : p;
+            });
+            return { ...prev, [convId]: { ...d, pages } };
+          });
+        },
+        onDesign: (design) => {
+          setDesigns((prev) => ({ ...prev, [convId]: design }));
+          if (canvasOpened) return;
+          canvasOpened = true;
+          const now = Date.now();
+          setPanel({ conversationId: convId, file: { path: DESIGN_FILE, name: DESIGN_FILE, size: 0, createdAt: now, updatedAt: now } });
+          if (activeRef.current === convId) setCollapsed(true);
+        },
         onDone: () => {
           updateMsg(convId, aid, { status: 'done' });
+          if (savedSkill) refreshSkills().catch(() => undefined);
           finish();
           if (activeRef.current !== convId) {
             setConversations((prev) => prev.map((c) => (c.id === convId ? { ...c, unread: true } : c)));
@@ -204,7 +245,7 @@ export default function App() {
     const id = convId;
     const userMsg: Message = { id: `um-${uid()}`, role: 'user', content: text, attachments, skill, createdAt: Date.now() };
     setMessagesMap((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), userMsg] }));
-    runAssistant(id, { prompt: text, mode, model, skill, attachments, temporary, userMessageId: userMsg.id });
+    runAssistant(id, { prompt: text, mode, model: chatModel, skill, attachments, temporary, userMessageId: userMsg.id });
     setSkill(undefined);
   };
 
@@ -214,7 +255,7 @@ export default function App() {
     if (!list.some((m) => m.role === 'user')) return;
     const trimmed = list[list.length - 1]?.role === 'assistant' ? list.slice(0, -1) : list;
     setMessagesMap((prev) => ({ ...prev, [activeId]: trimmed }));
-    runAssistant(activeId, { regenerate: true, mode, model });
+    runAssistant(activeId, { regenerate: true, mode, model: chatModel });
   };
 
   const patchConv = async (id: string, patch: { title?: string; pinned?: boolean }) => {
@@ -265,6 +306,20 @@ export default function App() {
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
+  const openSkills = () => {
+    setSkillsOpen(true);
+    closeOnMobile();
+  };
+
+  /** Leaves the skills page for a fresh task with the given skill selected in the composer. */
+  const startWithSkill = (name: string) => {
+    setSkillsOpen(false);
+    setActiveId(null);
+    setTemporary(false);
+    setSkill(name);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
   const resetSession = () => {
     stop();
     setMessagesMap({});
@@ -296,9 +351,11 @@ export default function App() {
       temporary={temporary && surface === 'daily'}
       streaming={!!streamingId && streamingId === activeId}
       mode={mode}
+      workModel={workModel}
       skill={skill}
-      placeholder={surface === 'work' && !inChat ? '今天一起做点什么？' : undefined}
+      placeholder={isWorkLike(surface) && !inChat ? (surface === 'design' ? '今天想设计点什么？' : '今天一起做点什么？') : undefined}
       onMode={setMode}
+      onWorkModel={setWorkModel}
       onSkill={pickSkill}
       onSend={send}
       onStop={stop}
@@ -306,8 +363,11 @@ export default function App() {
     />
   );
 
+  const showSkills = skillsOpen && surface === 'work';
+  const openPanel = inChat && !showSkills && panel?.conversationId === activeId ? panel : null;
+
   return (
-    <div className="app">
+    <div className={`app ${openPanel ? 'has-panel' : ''}`}>
       <Sidebar
         collapsed={collapsed}
         surface={surface}
@@ -321,7 +381,7 @@ export default function App() {
         onSurface={switchSurface}
         onToggle={() => setCollapsed((v) => !v)}
         onNew={newChat}
-        onTemporary={() => { setActiveId(null); setSkill(undefined); setTemporary((v) => !v); }}
+        onTemporary={() => { setActiveId(null); setSkill(undefined); setSkillsOpen(false); setTemporary((v) => !v); }}
         onSelect={selectConv}
         onDelete={deleteConv}
         onRename={(id, title) => patchConv(id, { title })}
@@ -329,13 +389,24 @@ export default function App() {
         onLogin={() => setLoginOpen(true)}
         onLogout={logout}
         onSearch={() => setSearchOpen(true)}
+        skillsOpen={showSkills}
+        onSkills={openSkills}
         toast={toast}
       />
       {!collapsed && <div className="sidebar-mask" onClick={() => setCollapsed(true)} />}
 
       <div className="main-shell">
         <main className="main">
-          <TopBar
+          {showSkills && (
+            <SkillsPage
+              sidebarCollapsed={collapsed}
+              onToggleSidebar={() => setCollapsed(false)}
+              onCreate={() => startWithSkill(SKILL_CREATOR)}
+              onUse={startWithSkill}
+              toast={toast}
+            />
+          )}
+          {!showSkills && <TopBar
             surface={surface}
             model={model}
             loggedIn={loggedIn}
@@ -346,12 +417,17 @@ export default function App() {
             onNew={newChat}
             onLogin={() => setLoginOpen(true)}
             toast={toast}
-          />
+          />}
 
-          {inChat ? (
+          {showSkills ? null : inChat ? (
             <div className="chat">
               <MessageList
                 messages={messages}
+                openFile={openPanel?.file.path}
+                onOpenFile={(file) => {
+                  setPanel({ conversationId: activeId!, file });
+                  setCollapsed(true);
+                }}
                 loading={msgLoading}
                 onRegenerate={regenerate}
                 onEdit={(t) => composerRef.current?.setText(t)}
@@ -388,6 +464,16 @@ export default function App() {
             </>
           )}
         </main>
+        {openPanel && (
+          <FilePanel
+            key={openPanel.conversationId}
+            conversationId={openPanel.conversationId}
+            file={openPanel.file}
+            design={designs[openPanel.conversationId]}
+            onClose={closePanel}
+            toast={toast}
+          />
+        )}
       </div>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} onSuccess={onLoggedIn} />}

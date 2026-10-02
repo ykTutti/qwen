@@ -32,12 +32,38 @@ const siteOf = (url: string) => {
   }
 };
 
+const MAX_REDIRECTS = 5;
+
+/**
+ * Follows redirects by hand so cookies set along the way are sent back: search engines' anti-bot
+ * layers (e.g. 360's WZWS) answer the first request with a cookie plus a redirect to the same URL,
+ * which fetch's built-in redirect handling loops on because it drops the cookie.
+ */
 async function fetchText(url: string, timeout: number, signal?: AbortSignal) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': UA, 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8', Accept: 'text/html,*/*' },
-    redirect: 'follow',
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
-  });
+  const abort = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout);
+  const cookies = new Map<string, string>();
+  let res: Response;
+  for (let hop = 0; ; hop++) {
+    res = await fetch(url, {
+      headers: {
+        'User-Agent': UA,
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        Accept: 'text/html,*/*',
+        ...(cookies.size ? { Cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join('; ') } : {}),
+      },
+      redirect: 'manual',
+      signal: abort,
+    });
+    for (const line of res.headers.getSetCookie()) {
+      const [pair] = line.split(';');
+      const eq = pair.indexOf('=');
+      if (eq > 0) cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+    }
+    const location = res.headers.get('location');
+    if (res.status < 300 || res.status >= 400 || !location) break;
+    if (hop >= MAX_REDIRECTS) throw new Error('重定向次数过多');
+    url = new URL(location, url).toString();
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const type = res.headers.get('content-type') ?? '';
   if (type && !/html|text/i.test(type)) throw new Error('非网页内容');
@@ -53,6 +79,7 @@ async function fetchText(url: string, timeout: number, signal?: AbortSignal) {
 
 async function searchDuckDuckGo(query: string, count: number, signal?: AbortSignal): Promise<SearchHit[]> {
   const html = await fetchText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=cn-zh`, SEARCH_TIMEOUT, signal);
+  if (html.includes('anomaly-modal')) throw new Error('触发了人机验证');
   const hits: SearchHit[] = [];
   for (const [, block] of html.matchAll(/<div class="result results_links[\s\S]*?<div class="clear"><\/div>/g)) {
     const link = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/.exec(block);
@@ -87,6 +114,41 @@ async function search360(query: string, count: number, signal?: AbortSignal): Pr
   return hits;
 }
 
+/** Bing wraps some result links as bing.com/ck/a?...&u=a1<base64url target>. */
+function unwrapBingUrl(url: string) {
+  const u = /[?&]u=a1([^&]+)/.exec(url)?.[1];
+  if (!u) return url;
+  try {
+    return Buffer.from(decodeURIComponent(u), 'base64url').toString('utf8');
+  } catch {
+    return url;
+  }
+}
+
+async function searchBing(query: string, count: number, signal?: AbortSignal): Promise<SearchHit[]> {
+  const html = await fetchText(`https://cn.bing.com/search?q=${encodeURIComponent(query)}&mkt=zh-CN`, SEARCH_TIMEOUT, signal);
+  const hits: SearchHit[] = [];
+  for (const [, block] of html.matchAll(/<li class="b_algo"[^>]*>([\s\S]*?)<\/li>/g)) {
+    const link = /<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/.exec(block);
+    if (!link) continue;
+    const url = unwrapBingUrl(decodeEntities(link[1]));
+    if (!/^https?:/.test(url)) continue;
+    const snippet = /<p class="b_lineclamp[^"]*"[^>]*>([\s\S]*?)<\/p>/.exec(block)?.[1]
+      ?? /class="b_caption"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/.exec(block)?.[1]
+      ?? '';
+    hits.push({ title: textOf(link[2]), url, site: siteOf(url), snippet: textOf(snippet).slice(0, 300) });
+    if (hits.length >= count) break;
+  }
+  return hits;
+}
+
+// Results are interleaved in this order, so the engine with the most relevant Chinese results goes first.
+const ENGINES = [
+  { name: '360', search: search360 },
+  { name: 'bing', search: searchBing },
+  { name: 'duckduckgo', search: searchDuckDuckGo },
+];
+
 async function readPage(url: string, signal?: AbortSignal) {
   const html = await fetchText(url, PAGE_TIMEOUT, signal);
   const body = /<body[^>]*>([\s\S]*)<\/body>/i.exec(html)?.[1] ?? html;
@@ -99,8 +161,12 @@ async function readPage(url: string, signal?: AbortSignal) {
 }
 
 export async function webSearch(query: string, count = 6, signal?: AbortSignal): Promise<SearchHit[]> {
-  const settled = await Promise.allSettled([searchDuckDuckGo(query, count, signal), search360(query, count, signal)]);
+  const settled = await Promise.allSettled(ENGINES.map((e) => e.search(query, count, signal)));
   if (signal?.aborted) throw new Error('已取消');
+  settled.forEach((r, i) => {
+    if (r.status === 'rejected') console.warn(`[search] ${ENGINES[i].name} failed: ${r.reason instanceof Error ? r.reason.message : r.reason}`);
+    else if (!r.value.length) console.warn(`[search] ${ENGINES[i].name} returned no results for ${JSON.stringify(query)}`);
+  });
   const lists = settled.map((r) => (r.status === 'fulfilled' ? r.value : []));
   const seen = new Set<string>();
   const hits: SearchHit[] = [];

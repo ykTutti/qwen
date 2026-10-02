@@ -1,13 +1,18 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { AgentBlock, Message, ToastFn } from '../types';
+import { DESIGN_FILE, type AgentBlock, type Message, type OutputFile, type ToastFn } from '../types';
 import { useConfig } from '../config';
+import { useSkills } from '../skills';
+import { FileIcon } from './FileIcon';
 import { Icon } from './Icon';
 import { HoverMenu } from './HoverMenu';
 
 interface Props {
   messages: Message[];
+  /** Path of the file currently shown in the side panel. */
+  openFile?: string;
+  onOpenFile: (file: OutputFile) => void;
   loading: boolean;
   onRegenerate: () => void;
   onEdit: (text: string) => void;
@@ -16,7 +21,7 @@ interface Props {
   loggedIn: boolean;
 }
 
-export function MessageList({ messages, loading, onRegenerate, onEdit, onDelete, toast, loggedIn }: Props) {
+export function MessageList({ messages, openFile, onOpenFile, loading, onRegenerate, onEdit, onDelete, toast, loggedIn }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const [showDown, setShowDown] = useState(false);
@@ -51,7 +56,7 @@ export function MessageList({ messages, loading, onRegenerate, onEdit, onDelete,
             </div>
           ) : (
             messages.map((m, i) => (
-              <MessageItem key={m.id} msg={m} isLast={i === messages.length - 1} onRegenerate={onRegenerate} onEdit={onEdit} onDelete={onDelete} toast={toast} loggedIn={loggedIn} />
+              <MessageItem key={m.id} msg={m} openFile={openFile} onOpenFile={onOpenFile} isLast={i === messages.length - 1} onRegenerate={onRegenerate} onEdit={onEdit} onDelete={onDelete} toast={toast} loggedIn={loggedIn} />
             ))
           )}
         </div>
@@ -86,9 +91,11 @@ const stripMd = (md: string) =>
     .trim();
 
 const MessageItem = memo(function MessageItem({
-  msg, isLast, onRegenerate, onEdit, onDelete, toast, loggedIn,
+  msg, isLast, openFile, onOpenFile, onRegenerate, onEdit, onDelete, toast, loggedIn,
 }: {
   msg: Message;
+  openFile?: string;
+  onOpenFile: (file: OutputFile) => void;
   isLast: boolean;
   onRegenerate: () => void;
   onEdit: (text: string) => void;
@@ -97,9 +104,11 @@ const MessageItem = memo(function MessageItem({
   loggedIn: boolean;
 }) {
   const { skills } = useConfig();
+  const { skills: agentSkills } = useSkills();
 
   if (msg.role === 'user') {
-    const skill = skills.find((s) => s.key === msg.skill);
+    const agentSkill = agentSkills.find((s) => s.name === msg.skill);
+    const skill = agentSkill ? { icon: 'component', name: agentSkill.title } : skills.find((s) => s.key === msg.skill);
     return (
       <div className="msg-user">
         {msg.attachments && msg.attachments.length > 0 && (
@@ -132,6 +141,12 @@ const MessageItem = memo(function MessageItem({
           <AnalysisBar msg={msg} />
           {msg.content && <Markdown text={msg.content} streaming={msg.status === 'streaming'} toast={toast} />}
         </>
+      )}
+
+      {!busy && msg.files && msg.files.length > 0 && (
+        <div className="file-cards">
+          {msg.files.map((f) => <FileCard key={f.path} file={f} active={openFile === f.path} onOpen={onOpenFile} />)}
+        </div>
       )}
 
       {msg.status === 'stopped' && <div className="stopped-tip">已停止生成</div>}
@@ -247,7 +262,7 @@ function AnswerActions({
   );
 }
 
-function Markdown({ text, streaming, toast }: { text: string; streaming?: boolean; toast: ToastFn }) {
+export function Markdown({ text, streaming, toast }: { text: string; streaming?: boolean; toast: ToastFn }) {
   return (
     <div className={`markdown ${streaming ? 'is-streaming' : ''}`}>
       <ReactMarkdown
@@ -287,9 +302,36 @@ function AgentBlocks({ msg, toast }: { msg: Message; toast: ToastFn }) {
         return b.text.trim() ? <Markdown key={i} text={b.text} streaming={live && isLast} toast={toast} /> : null;
       })}
       {live && blocks[blocks.length - 1].type === 'tool' && blocks.every((b) => b.type !== 'tool' || b.status === 'done' || b.status === 'error') && (
-        <div className="agent-step-hint"><Icon name="loading" className="spin" size={14} />正在整理搜索结果</div>
+        <div className="agent-step-hint"><Icon name="loading" className="spin" size={14} />{blocks.some((b) => b.type === 'tool' && b.name !== 'web_search') ? '正在继续处理' : '正在整理搜索结果'}</div>
       )}
     </div>
+  );
+}
+
+export const formatSize = (bytes: number) =>
+  bytes < 1024 ? `${bytes}B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+
+function timeAgo(ts: number) {
+  const sec = Math.max(0, (Date.now() - ts) / 1000);
+  if (sec < 60) return '刚刚';
+  if (sec < 3600) return `${Math.floor(sec / 60)}分钟前`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}小时前`;
+  if (sec < 86400 * 30) return `${Math.floor(sec / 86400)}天前`;
+  return new Date(ts).toLocaleDateString('zh-CN');
+}
+
+/** The icon already shows the file type, so the card drops the extension. */
+const stripExt = (name: string) => name.replace(/\.[a-z0-9]{1,8}$/i, '') || name;
+
+function FileCard({ file, active, onOpen }: { file: OutputFile; active: boolean; onOpen: (file: OutputFile) => void }) {
+  return (
+    <button className={`file-card ${active ? 'is-active' : ''}`} onClick={() => onOpen(file)} title={file.path}>
+      <FileIcon name={file.name} />
+      <span className="file-card-text">
+        <span className="file-card-name">{file.path === DESIGN_FILE ? '设计画布' : stripExt(file.name)}</span>
+        <span className="file-card-meta">创建于 {timeAgo(file.createdAt)} · {formatSize(file.size)}</span>
+      </span>
+    </button>
   );
 }
 
@@ -308,12 +350,13 @@ function ReasoningBlock({ block, active }: { block: ReasoningBlockData; active: 
   );
 }
 
-/** Pulls the query out of possibly incomplete streamed JSON arguments. */
-function queryOf(args: string) {
+/** Pulls a field out of possibly incomplete streamed JSON arguments. */
+function argOf(args: string, key: string): string {
   try {
-    return String(JSON.parse(args).query ?? '');
+    const v = JSON.parse(args)[key];
+    return Array.isArray(v) ? v.join('、') : String(v ?? '');
   } catch {
-    const m = /"query"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(args);
+    const m = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`).exec(args);
     if (!m) return '';
     try {
       return JSON.parse(`"${m[1].replace(/\\$/, '')}"`);
@@ -323,27 +366,54 @@ function queryOf(args: string) {
   }
 }
 
-const TOOL_LABELS: Record<string, string> = { web_search: '联网搜索' };
+interface ToolMeta {
+  label: string;
+  icon: string;
+  /** Argument keys tried in order for the chip next to the label. */
+  args: string[];
+  pending: string;
+  running: string;
+}
+
+const TOOL_META: Record<string, ToolMeta> = {
+  web_search: { label: '联网搜索', icon: 'search2', args: ['query'], pending: '生成搜索词', running: '搜索中' },
+  list_dir: { label: '查看目录', icon: 'folder', args: ['path'], pending: '准备中', running: '读取中' },
+  read_file: { label: '读取文件', icon: 'fileUpload', args: ['path'], pending: '准备中', running: '读取中' },
+  write_file: { label: '写入文件', icon: 'edit', args: ['path'], pending: '生成内容', running: '写入中' },
+  edit_file: { label: '修改文件', icon: 'edit', args: ['path'], pending: '生成修改', running: '修改中' },
+  delete_file: { label: '删除文件', icon: 'answerDelete', args: ['paths'], pending: '准备中', running: '删除中' },
+  search_files: { label: '搜索文件', icon: 'search2', args: ['query', 'glob', 'path'], pending: '准备中', running: '搜索中' },
+  run_command: { label: '执行命令', icon: 'code', args: ['command'], pending: '生成命令', running: '执行中' },
+  check_command: { label: '查看命令输出', icon: 'code', args: ['command_id'], pending: '准备中', running: '等待中' },
+  kill_command: { label: '终止命令', icon: 'code', args: ['command_id'], pending: '准备中', running: '终止中' },
+  save_skill: { label: '保存技能', icon: 'component', args: ['title', 'name'], pending: '撰写技能说明', running: '保存中' },
+  update_design: { label: '登记页面', icon: 'edit', args: ['page_id'], pending: '准备中', running: '登记中' },
+  run_subagent: { label: '子 agent', icon: 'connector', args: ['description', 'agent_id'], pending: '撰写任务说明', running: '执行中' },
+};
 
 function ToolBlock({ block }: { block: ToolBlockData }) {
   const [open, setOpen] = useState(false);
-  const query = queryOf(block.args);
+  const meta = TOOL_META[block.name];
+  const chip = (meta?.args ?? []).map((k) => argOf(block.args, k)).find(Boolean) ?? '';
   const count = block.results?.length ?? 0;
   const busy = block.status === 'pending' || block.status === 'running';
   const status =
-    block.status === 'pending' ? '生成搜索词' : block.status === 'running' ? '搜索中' : block.status === 'error' ? block.error ?? '搜索失败' : `找到 ${count} 篇资料`;
-  const expandable = count > 0;
+    block.status === 'pending' ? meta?.pending ?? '准备中'
+    : block.status === 'running' ? block.summary ?? meta?.running ?? '执行中'
+    : block.status === 'error' ? block.error ?? '执行失败'
+    : block.summary ?? (block.name === 'web_search' ? `找到 ${count} 篇资料` : '已完成');
+  const expandable = count > 0 || !!block.output;
 
   return (
     <div className={`agent-tool is-${block.status}`}>
       <button className={`agent-step-head ${expandable ? '' : 'is-static'}`} onClick={() => expandable && setOpen(!open)} aria-expanded={open}>
-        {busy ? <Icon name="loading" className="spin" size={14} /> : <Icon name="search2" size={14} />}
-        <span className="agent-tool-name">{TOOL_LABELS[block.name] ?? block.name ?? '调用工具'}</span>
-        {query && <span className="agent-tool-query">{query}</span>}
+        {busy ? <Icon name="loading" className="spin" size={14} /> : <Icon name={meta?.icon ?? 'component'} size={14} />}
+        <span className="agent-tool-name">{meta?.label ?? (block.name || '调用工具')}</span>
+        {chip && <span className="agent-tool-query" title={chip}>{chip}</span>}
         <span className="agent-tool-status">{status}</span>
         {expandable && <Icon name="rightMini" size={12} className={`chevron-r ${open ? 'is-open' : ''}`} />}
       </button>
-      {open && expandable && (
+      {open && count > 0 && (
         <ol className="source-list agent-sources">
           {block.results!.map((s, i) => (
             <li key={s.url + i}>
@@ -354,6 +424,7 @@ function ToolBlock({ block }: { block: ToolBlockData }) {
           ))}
         </ol>
       )}
+      {open && !count && block.output && <pre className="agent-tool-output">{block.output}</pre>}
     </div>
   );
 }

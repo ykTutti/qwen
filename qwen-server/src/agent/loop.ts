@@ -1,22 +1,27 @@
-import { streamCompletion, type LlmMessage, type LlmToolCall } from '../llm/deepseek.js';
-import type { AgentBlock, Message } from '../types.js';
-import { toolDefinitions, toolMap } from './tools/index.js';
+import { streamCompletion, type LlmMessage, type LlmToolCall, type ModelTarget } from '../llm/client.js';
+import type { Skill } from '../skills.js';
+import { isWorkLike, type AgentBlock, type Message, type Surface } from '../types.js';
+import { readDesign } from './tools/design.js';
+import { describeFile, snapshotOutputs } from './tools/files.js';
+import { toolsFor } from './tools/index.js';
+import { isSandboxed } from './tools/sandbox.js';
+import type { AgentSession } from './tools/types.js';
 
-const MAX_STEPS = 6;
+const MAX_STEPS: Record<Surface, number> = { daily: 6, work: 30, design: 30 };
 const FINAL_NUDGE = '已达到本轮工具调用上限，请立即基于已获得的信息给出最终回答，不要再调用任何工具。';
 const HISTORY_LIMIT = 20;
 
 type ToolBlock = Extract<AgentBlock, { type: 'tool' }>;
 type ReasoningBlock = Extract<AgentBlock, { type: 'reasoning' }>;
 
-export type AgentEmit = (event: 'reasoning' | 'delta' | 'tool_call' | 'tool_result', data: unknown) => void;
+export type AgentEmit = (event: 'reasoning' | 'delta' | 'tool_call' | 'tool_result' | 'files' | 'design', data: unknown) => void;
 
 /** Raw model/tool messages produced by each agent turn, keyed by assistant message id, replayed as history. */
 const traces = new Map<string, LlmMessage[]>();
 
 export const forgetTrace = (messageId: string) => traces.delete(messageId);
 
-function systemPrompt() {
+function systemPrompt(surface: Surface, target: ModelTarget, skill?: Skill) {
   const now = new Date().toLocaleString('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour12: false,
@@ -28,7 +33,7 @@ function systemPrompt() {
     minute: '2-digit',
   });
   return [
-    '你是千问网页版中的 AI 助手，当前由 DeepSeek 模型驱动。',
+    `你是千问网页版中的 AI 助手，当前由 ${target.displayName} 模型驱动。`,
     `当前时间：${now}（北京时间）。`,
     '',
     '# 工具使用',
@@ -45,7 +50,67 @@ function systemPrompt() {
     '- 基于搜索结果回答时，综合多个来源，留意信息的发布时间，优先采用最新、权威的来源；结果互相矛盾时说明差异。',
     '- 不要编造数据、链接或来源；搜索不到时如实说明。',
     '- 使用简体中文和 Markdown，结构清晰、重点突出，不要复述搜索过程。',
+    ...(surface === 'design' ? designPrompt() : []),
+    ...(surface === 'work' ? workPrompt() : []),
+    ...(isWorkLike(surface) ? agentToolsPrompt(surface) : []),
+    ...(skill ? skillPrompt(skill) : []),
   ].join('\n');
+}
+
+function skillPrompt(skill: Skill) {
+  return [
+    '',
+    `# 当前技能：${skill.title}（${skill.name}）`,
+    '本对话启用了这个技能。请严格按照下面的技能说明完成任务；说明与上文的通用要求冲突时，以技能说明为准。',
+    '<skill>',
+    skill.body,
+    '</skill>',
+  ];
+}
+
+function workPrompt() {
+  return ['', '# 工作模式', '你现在是千问工作助理，帮助用户处理文档、数据、调研和各类办公任务。'];
+}
+
+function designPrompt() {
+  return [
+    '',
+    '# 设计模式',
+    '你现在是千问设计助理，是用户的产品与设计搭档：帮用户发散思维、把想法落成可以直接打开体验的原型。',
+    '',
+    '## 发散构思',
+    '- 用户想法还模糊、或者明确要求头脑风暴时，先发散：给出 3～5 个差异明显的方向，而不是同一思路的小变体。',
+    '- 每个方向说清：核心概念（一句话）、目标用户与场景、关键体验或亮点、主要风险或取舍。可以用表格横向对比。',
+    '- 适当用类比、反向思考、极端场景、跨行业借鉴等方法打开思路，标出你最推荐的方向和理由。',
+    '- 最后给出收敛建议：下一步先验证什么、选哪个方向做原型。',
+    '- 关键信息缺失（目标用户、平台、核心目标）时，用一条消息问清楚，最多 3 个问题；信息足够就直接开始。',
+    '',
+    '## 落地原型',
+    '- 设计内容明确后，严格按照下文「设计」技能的流程落地：规划.md 与 design.json 骨架 → 公共组件 → 并行派发子 agent 实现页面并登记 → 验收 → 回复。',
+    '- 所有输出都用简体中文，包括调用工具前后的过渡说明（如"先写规划""公共组件已完成，开始并行实现页面"），过渡说明一句话即可。',
+    '- run_subagent 用来派发页面：子 agent 与你共享工作区，但看不到对话，prompt 必须自成一体。用户看不到子 agent 的报告，由你汇总后回复。',
+    '- 原型尽量不引用外部资源；图片用 CSS 渐变、emoji 或内联 SVG 代替。design.json 会实时渲染成右侧的设计画布（每个页面一个节点，按导航关系连线），生成的文件也会以卡片形式附在回复末尾。',
+  ];
+}
+
+/** File and terminal rules shared by the agent surfaces (work and design). */
+function agentToolsPrompt(surface: Surface) {
+  const sandboxed = isSandboxed();
+  return [
+    '',
+    '# 本地文件与终端',
+    sandboxed
+      ? '你拥有一个本对话专属的工作区，在终端里它位于 /workspace（Linux 沙箱环境，其他对话看不到这里的文件）。'
+      : '你拥有一个本对话专属的工作区目录，终端命令默认在这个目录里执行，不要访问目录以外的文件。',
+    '- 文件工具：list_dir 查看目录，read_file 读取，write_file 新建或覆盖，edit_file 局部修改，delete_file 删除，search_files 按文件名或内容搜索。',
+    `- 终端工具：run_command 执行 shell 命令，check_command 查看后台命令输出，kill_command 终止命令。${sandboxed ? '沙箱预装了 node、npm、python3、git、curl。' : ''}`,
+    `- 文件工具的路径都相对工作区根目录，不能访问工作区以外的文件${sandboxed ? '；沙箱可能没有外网，安装依赖失败时如实告诉用户' : ''}。`,
+    '- 先了解再动手：修改文件前先读取原文；不确定目录结构时先 list_dir 或 search_files。',
+    '- 删除文件、覆盖已有文件、执行有破坏性或不可逆的命令前，确认这是用户明确要求的。',
+    '- 完成后用简洁的中文说明做了什么、改了哪些文件、命令结果如何；不要把大段文件内容原样贴回给用户。',
+    '- 本轮在工作区里新建或修改的文档（.md、.html、.pptx、.docx、.xlsx、.pdf、.csv 等，无论用文件工具还是脚本生成）会自动以文件卡片的形式附在你的回复末尾，用户可以点开预览或下载。回复里只需一两句话说明，不要再写文件链接（如 [x.pptx](x.pptx)）、文件内容或路径清单。',
+    ...(surface === 'work' ? ['- save_skill 会把技能保存到用户的技能库，只在用户要求创建或更新技能时使用。'] : []),
+  ];
 }
 
 export function buildHistory(list: Message[]): LlmMessage[] {
@@ -78,18 +143,41 @@ interface PendingCall {
 export async function runAgent(opts: {
   assistant: Message;
   history: LlmMessage[];
+  surface: Surface;
+  target: ModelTarget;
+  /** Per-conversation sandbox for the local file and shell tools; only present in work mode. */
+  session?: AgentSession;
+  /** Skill the user enabled in this conversation; its instructions go into the system prompt. */
+  skill?: Skill;
   thinking: boolean;
   signal: AbortSignal;
   emit: AgentEmit;
 }) {
-  const { assistant, history, thinking, signal, emit } = opts;
+  const { assistant, history, surface, target, session, skill, thinking, signal, emit } = opts;
   const tag = `[agent ${assistant.id.slice(-8)}]`;
   const began = Date.now();
   const lastUser = [...history].reverse().find((m) => m.role === 'user');
-  console.log(`${tag} start thinking=${thinking} query=${JSON.stringify(lastUser?.content.slice(0, 80) ?? '')}`);
+  console.log(`${tag} start model=${target.model} surface=${surface} thinking=${thinking}${skill ? ` skill=${skill.name}` : ''} query=${JSON.stringify(lastUser?.content.slice(0, 80) ?? '')}`);
   const blocks = (assistant.blocks ??= []);
   const trace: LlmMessage[] = [];
-  const base: LlmMessage[] = [{ role: 'system', content: systemPrompt() }, ...history];
+  const base: LlmMessage[] = [{ role: 'system', content: systemPrompt(surface, target, skill) }, ...history];
+  const tools = toolsFor(surface);
+  const maxSteps = MAX_STEPS[surface];
+  // Diffing the work dir catches deliverables however they were made: file tools, or scripts run in the terminal.
+  const before = session ? await snapshotOutputs(session).catch(() => undefined) : undefined;
+
+  // Pushes design.json to the canvas whenever it changes; checks are chained so emits stay in order.
+  let designStamp = surface === 'design' && session ? (await readDesign(session).catch(() => undefined))?.stamp : undefined;
+  let designCheck = Promise.resolve();
+  const syncDesign = () => {
+    if (surface !== 'design' || !session) return;
+    designCheck = designCheck.then(async () => {
+      const current = await readDesign(session).catch(() => undefined);
+      if (!current || current.stamp === designStamp) return;
+      designStamp = current.stamp;
+      emit('design', { design: current.design });
+    });
+  };
 
   const closeReasoning = () => {
     const last = blocks.at(-1);
@@ -118,7 +206,7 @@ export async function runAgent(opts: {
     emit('tool_call', { block });
     console.log(`${tag} tool ${block.name} ${block.args}`);
     try {
-      const tool = toolMap.get(block.name);
+      const tool = tools.map.get(block.name);
       if (!tool) throw new Error(`未知工具：${block.name}`);
       let args: Record<string, unknown>;
       try {
@@ -126,9 +214,17 @@ export async function runAgent(opts: {
       } catch {
         throw new Error('工具参数不是合法的 JSON');
       }
-      const out = await tool.execute(args, { signal });
+      const progress = (update: { summary?: string; output?: string }) => {
+        if (block.status !== 'running') return;
+        if (update.summary !== undefined) block.summary = update.summary;
+        if (update.output !== undefined) block.output = update.output;
+        emit('tool_call', { block });
+      };
+      const out = await tool.execute(args, { signal, session, progress, changed: syncDesign, model: target });
       block.status = 'done';
       block.results = out.sources;
+      block.summary = out.summary;
+      block.output = out.output;
       return out.content;
     } catch (err) {
       block.status = 'error';
@@ -137,12 +233,13 @@ export async function runAgent(opts: {
     } finally {
       block.endedAt = Date.now();
       emit('tool_result', { block });
+      syncDesign();
       console.log(`${tag} tool ${block.name} ${block.status} results=${block.results?.length ?? 0} ${block.endedAt - block.startedAt!}ms${block.error ? ` error=${block.error}` : ''}`);
     }
   };
 
   try {
-    for (let step = 0; step < MAX_STEPS; step++) {
+    for (let step = 0; step < maxSteps; step++) {
       const calls: PendingCall[] = [];
       const start = (i: number) => {
         const call = calls[i];
@@ -152,10 +249,11 @@ export async function runAgent(opts: {
       let reasoning = '';
       let finishReason: string | null = null;
 
-      const final = step === MAX_STEPS - 1;
+      const final = step === maxSteps - 1;
       const stream = streamCompletion({
+        target,
         messages: final ? [...base, ...trace, { role: 'system', content: FINAL_NUDGE }] : [...base, ...trace],
-        tools: final ? undefined : toolDefinitions,
+        tools: final ? undefined : tools.definitions,
         thinking,
         signal,
       });
@@ -213,7 +311,20 @@ export async function runAgent(opts: {
       results.forEach((result, i) => trace.push({ role: 'tool', tool_call_id: calls[i].block.id, content: result }));
     }
   } finally {
+    syncDesign();
+    await designCheck;
     traces.set(assistant.id, completeTrace(trace));
+    const after = session && before ? await snapshotOutputs(session).catch(() => undefined) : undefined;
+    const changed = after ? [...after].filter(([p, stamp]) => before!.get(p) !== stamp).map(([p]) => p) : [];
+    if (session && changed.length) {
+      const files = (await Promise.all(changed.map((p) => describeFile(session, p).catch(() => undefined))))
+        .filter((f) => !!f)
+        .sort((a, b) => a.updatedAt - b.updatedAt);
+      if (files.length) {
+        assistant.files = files;
+        emit('files', { files });
+      }
+    }
     console.log(`${tag} end ${signal.aborted ? 'aborted' : 'ok'} ${Date.now() - began}ms`);
   }
 }

@@ -1,6 +1,8 @@
-import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
-import type { ChatMode, Skill, Surface, ToastFn } from '../types';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { isWorkLike, type ChatMode, type Skill, type Surface, type ToastFn } from '../types';
 import { useConfig } from '../config';
+import { SKILL_CREATOR, refreshSkills, useSkills } from '../skills';
 import { Icon } from './Icon';
 import { Popover } from './Popover';
 import modelLogo from '../assets/models/qwen.png';
@@ -21,9 +23,11 @@ interface Props {
   temporary?: boolean;
   streaming: boolean;
   mode: ChatMode;
+  workModel: string;
   skill?: string;
   placeholder?: string;
   onMode: (m: ChatMode) => void;
+  onWorkModel: (key: string) => void;
   onSkill: (key?: string) => void;
   onSend: (text: string, attachments: string[]) => void;
   onStop: () => void;
@@ -35,12 +39,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   const [text, setText] = useState('');
   const [files, setFiles] = useState<string[]>([]);
   const [composing, setComposing] = useState(false);
-  const [workModel, setWorkModel] = useState(workModels[0].key);
+  const [localOpen, setLocalOpen] = useState(false);
+  const workModel = workModels.some((m) => m.key === props.workModel) ? props.workModel : workModels[0].key;
   const [optionValues, setOptionValues] = useState<Record<string, string>>({});
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const skill = skills.find((s) => s.key === props.skill);
-  const isWork = props.surface === 'work';
+  const isWork = isWorkLike(props.surface);
+  const skill = isWork ? undefined : skills.find((s) => s.key === props.skill);
+  const { skills: agentSkills } = useSkills();
+  const workSkill = props.surface === 'work' && props.skill
+    ? agentSkills.find((s) => s.name === props.skill) ?? { name: props.skill, title: props.skill === SKILL_CREATOR ? '新建技能' : props.skill }
+    : undefined;
+  const placeholder = workSkill
+    ? workSkill.name === SKILL_CREATOR ? '描述你想创建的技能，比如：每周根据我给的要点写一份周报' : `使用「${workSkill.title}」，描述你的任务`
+    : props.placeholder ?? skill?.placeholder ?? '向千问提问';
+
+  useEffect(() => {
+    if (!localOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setLocalOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [localOpen]);
 
   useImperativeHandle(ref, () => ({
     focus: () => taRef.current?.focus(),
@@ -92,7 +111,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     if (measureRef.current) ro.observe(measureRef.current);
     document.fonts?.ready.then(fit);
     return () => ro.disconnect();
-  }, [props.mode, isWork, !!skill, !!props.temporary]);
+  }, [props.mode, isWork, !!skill, !!workSkill, !!props.temporary]);
 
   const openSkill = (s: Skill) => {
     if (s.href) window.open(s.href, '_blank', 'noopener');
@@ -260,11 +279,51 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   };
 
   const renderWorkTools = () => {
+    if (workSkill) {
+      return (
+        <span className="skill-chip">
+          <Icon name="component" />
+          {workSkill.title}
+          <button onClick={() => props.onSkill(undefined)} title="退出技能"><Icon name="close" size={10} /></button>
+        </span>
+      );
+    }
     const tools = [
       { key: 'work.env', label: '云端', icon: 'cloud', items: ['云端', '本地'] },
       { key: 'work.conn', label: '连接', icon: 'connector', items: ['钉钉文档', '飞书文档', '企业邮箱', '添加连接…'] },
-      { key: 'work.skill', label: '技能', icon: 'component', items: ['数据分析', '文案撰写', '竞品调研', '会议纪要'] },
+      ...(props.surface === 'work' ? [{ key: 'work.skill', label: '技能', icon: 'component', items: [] }] : []),
     ];
+    const library = agentSkills.filter((s) => !s.hidden);
+    const skillItems = (close: () => void) => (
+      <>
+        {library.length === 0 && <div className="menu-head">技能库还没有技能</div>}
+        {library.map((s) => (
+          <button key={s.name} title={s.description} onClick={() => { props.onSkill(s.name); close(); }}>{s.title}</button>
+        ))}
+        <div className="menu-divider" />
+        <button onClick={() => { props.onSkill(SKILL_CREATOR); close(); }}><Icon name="add" />新建技能</button>
+      </>
+    );
+    const skillTool = () => (
+      <Popover
+        key="work.skill"
+        trigger={(open, toggle) => (
+          <button
+            className={`tool ${open ? 'is-open' : ''}`}
+            onClick={() => {
+              if (!open) refreshSkills().catch(() => undefined);
+              toggle();
+            }}
+          >
+            <Icon name="component" />
+            <span>技能</span>
+            <Icon name="downMini" size={12} className={`chevron ${open ? 'is-up' : ''}`} />
+          </button>
+        )}
+      >
+        {(close) => <div className="menu menu-skills">{skillItems(close)}</div>}
+      </Popover>
+    );
     const pick = (key: string) => (v: string) => setOptionValues((p) => ({ ...p, [key]: v }));
     const env = WORK_ENVS.find((e) => e.value === optionValues['work.env']) ?? WORK_ENVS[0];
     const staticTool = (t: (typeof tools)[number]) => (
@@ -292,7 +351,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
               <button
                 key={e.value}
                 className={`env-item ${e.value === env.value ? 'is-active' : ''}`}
-                onClick={() => { pick('work.env')(e.value); close(); }}
+                onClick={() => {
+                  if (e.value === '本地') setLocalOpen(true);
+                  else pick('work.env')(e.value);
+                  close();
+                }}
               >
                 <span className="env-item-main">
                   <Icon name={e.icon} />
@@ -323,7 +386,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           {moreTrigger(false)}
         </div>
         {shown.map((t) =>
-          t.key === 'work.env' ? envTool() : dropdownTool(t.label, t.icon, t.items, optionValues[t.key] ?? '', pick(t.key)),
+          t.key === 'work.env' ? envTool()
+            : t.key === 'work.skill' ? skillTool()
+              : dropdownTool(t.label, t.icon, t.items, optionValues[t.key] ?? '', pick(t.key)),
         )}
         {hidden.length > 0 && (
           <Popover trigger={moreTrigger}>
@@ -332,8 +397,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
                 {hidden.map((t) => (
                   <div key={t.key} className="menu-group">
                     <div className="menu-head"><Icon name={t.icon} />{t.label}</div>
+                    {t.key === 'work.skill' && skillItems(close)}
                     {t.items.map((it) => (
-                      <button key={it} onClick={() => { pick(t.key)(it); close(); }}>
+                      <button key={it} onClick={() => {
+                        if (t.key === 'work.env' && it === '本地') setLocalOpen(true);
+                        else pick(t.key)(it);
+                        close();
+                      }}>
                         {it}
                         {(optionValues[t.key] || t.label) === it && <Icon name="qwpcicon-check" className="menu-tail menu-check" />}
                       </button>
@@ -368,12 +438,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           ref={taRef}
           rows={1}
           value={text}
-          placeholder={props.placeholder ?? skill?.placeholder ?? '向千问提问'}
+          placeholder={placeholder}
           onChange={(e) => setText(e.target.value)}
           onCompositionStart={() => setComposing(true)}
           onCompositionEnd={() => setComposing(false)}
           onKeyDown={(e) => {
-            if (e.key === 'Backspace' && !text && skill) props.onSkill(undefined);
+            if (e.key === 'Backspace' && !text && (skill || workSkill)) props.onSkill(undefined);
             if (e.key === 'Enter' && !e.shiftKey && !composing) {
               e.preventDefault();
               send();
@@ -403,7 +473,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
                         <button
                           key={m.key}
                           className={`work-model-item ${m.key === workModel ? 'is-active' : ''}`}
-                          onClick={() => { setWorkModel(m.key); close(); }}
+                          onClick={() => { props.onWorkModel(m.key); close(); }}
                         >
                           <span className="work-model-label">
                             <img src={modelLogo} width={16} height={16} alt="" />
@@ -443,6 +513,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           </div>
         </div>
       </div>
+      {localOpen && createPortal(
+        <div className="modal-mask local-modal-mask" onMouseDown={() => setLocalOpen(false)}>
+          <div className="local-modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
+            <img
+              className="local-modal-hero"
+              src="https://g.alicdn.com/code/npm/@ali/qianwen-web/4.8.6/web/static/image/local-computer-modal-hero.png"
+              alt=""
+              aria-hidden="true"
+            />
+            <button className="local-modal-close" title="关闭" aria-label="关闭" onClick={() => setLocalOpen(false)} />
+            <div className="local-modal-body">
+              <h2>本地办公助理已上线</h2>
+              <p>任务助理全面升级，能整理文件、做调研、跑定时任务，全面支撑你的办公需求。</p>
+              <div className="local-modal-foot">
+                <a className="btn-primary" href="https://www.qianwen.com/download" target="_blank" rel="noreferrer" onClick={() => setLocalOpen(false)}>下载千问电脑版</a>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
       <input
         ref={fileRef}
         type="file"
