@@ -1,6 +1,8 @@
 import type { ModelOption, SearchSource, Skill } from '../types.js';
 
 export const models: ModelOption[] = [
+  { key: 'qwen3.8-max', name: 'Qwen3.8-Max', desc: '最新旗舰模型，推理与综合能力更强' },
+  { key: 'qwen3.8-flash', name: 'Qwen3.8-Flash', desc: '新一代极速模型，日常问答秒回' },
   { key: 'qwen3.7', name: 'Qwen3.7-千问', desc: '综合AI助手，全面回答工作、学习、生活各类问题' },
   { key: 'qwen3.7-max', name: 'Qwen3.7-Max', desc: '擅长代码编写，处理复杂任务' },
   { key: 'qwen3.6-flash', name: 'Qwen3.6-Flash', desc: '适用于简单任务，响应速度快' },
