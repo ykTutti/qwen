@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { isWorkLike, type ChatMode, type Skill, type Surface, type ToastFn } from '../types';
+import { elementTitle, isWorkLike, type ChatMode, type ElementRef, type Skill, type Surface, type ToastFn } from '../types';
 import { useConfig } from '../config';
 import { SKILL_CREATOR, refreshSkills, useSkills } from '../skills';
 import { Icon } from './Icon';
@@ -29,6 +29,9 @@ interface Props {
   onMode: (m: ChatMode) => void;
   onWorkModel: (key: string) => void;
   onSkill: (key?: string) => void;
+  /** Design-canvas elements that will ride along with the next message. */
+  elements?: ElementRef[];
+  onRemoveElement?: (ref: ElementRef) => void;
   onSend: (text: string, attachments: string[]) => void;
   onStop: () => void;
   toast: ToastFn;
@@ -118,11 +121,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     else props.onSkill(s.key);
   };
 
-  const canSend = (text.trim().length > 0 || files.length > 0) && !props.streaming;
+  const elements = props.elements ?? [];
+  const canSend = (text.trim().length > 0 || files.length > 0 || elements.length > 0) && !props.streaming;
 
   const send = () => {
     if (!canSend) return;
-    props.onSend(text.trim() || '请帮我分析这些文件', files);
+    const fallback = files.length
+      ? '请帮我分析这些文件'
+      : elements.some((el) => el.comment) ? '请根据评论修改选中的元素' : '请优化选中的元素';
+    props.onSend(text.trim() || fallback, files);
     setText('');
     setFiles([]);
   };
@@ -423,8 +430,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   return (
     <div className="composer-wrap">
       <div className={`composer ${isWork ? 'is-work' : ''}`}>
-        {files.length > 0 && (
+        {(files.length > 0 || elements.length > 0) && (
           <div className="attach-list">
+            {elements.map((el) => (
+              <div key={`${el.pageId}|${el.selector}|${el.comment ?? ''}`} className="attach-chip is-element" title={elementTitle(el)}>
+                <Icon name={el.comment ? 'comment' : 'target'} size={14} />
+                <span><em>{el.pageName}</em>{el.name}{el.comment && <i>{el.comment}</i>}</span>
+                <button onClick={() => props.onRemoveElement?.(el)}><Icon name="close" size={10} /></button>
+              </div>
+            ))}
             {files.map((f) => (
               <div key={f} className="attach-chip">
                 <Icon name="fileUpload" />

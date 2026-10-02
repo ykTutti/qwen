@@ -5,6 +5,9 @@ import { appConfig, mockSources } from './data/config.js';
 import { getWorkspace, guestOwner, login, logout, newId, userByToken, type Workspace } from './store.js';
 import { buildHistory, forgetTrace, runAgent } from './agent/loop.js';
 import { readDesign } from './agent/tools/design.js';
+import { applyDesignStyle, StyleError } from './designStyle.js';
+import { parseElementRefs } from './elementRefs.js';
+import { addComment, CommentError, listComments, setCommentResolved } from './designComments.js';
 import { outputFilePath, readOutputFile } from './agent/tools/files.js';
 import { DESIGN_SKILL, getSkill, listSkills } from './skills.js';
 import { forgetPreview, previewKey, servePreview } from './preview.js';
@@ -126,6 +129,53 @@ app.get('/api/conversations/:id/design', (req, res, next) => {
     const current = conv.sandboxId ? await readDesign(sessionFor(conv.sandboxId)) : undefined;
     if (!current) throw new HttpError(404, '还没有设计画布');
     res.json(current.design);
+  })().catch(next);
+});
+
+app.post('/api/conversations/:id/design/style', (req, res, next) => {
+  (async () => {
+    const conv = findConv(req.ws, req.params.id);
+    if (!conv.sandboxId) throw new HttpError(404, '还没有设计画布');
+    const { page, selector, styles } = req.body ?? {};
+    try {
+      res.json(await applyDesignStyle(sessionFor(conv.sandboxId), String(page ?? ''), String(selector ?? ''), styles));
+    } catch (err) {
+      if (err instanceof StyleError) throw new HttpError(400, err.message);
+      throw err;
+    }
+  })().catch(next);
+});
+
+app.get('/api/conversations/:id/comments', (req, res, next) => {
+  (async () => {
+    const conv = findConv(req.ws, req.params.id);
+    res.json(conv.sandboxId ? await listComments(sessionFor(conv.sandboxId)) : []);
+  })().catch(next);
+});
+
+app.post('/api/conversations/:id/comments', (req, res, next) => {
+  (async () => {
+    const conv = findConv(req.ws, req.params.id);
+    if (!conv.sandboxId) throw new HttpError(404, '还没有设计画布');
+    try {
+      res.json(await addComment(sessionFor(conv.sandboxId), req.body ?? {}, req.user?.name ?? '游客'));
+    } catch (err) {
+      if (err instanceof CommentError) throw new HttpError(400, err.message);
+      throw err;
+    }
+  })().catch(next);
+});
+
+app.patch('/api/conversations/:id/comments/:commentId', (req, res, next) => {
+  (async () => {
+    const conv = findConv(req.ws, req.params.id);
+    if (!conv.sandboxId) throw new HttpError(404, '评论不存在');
+    try {
+      res.json(await setCommentResolved(sessionFor(conv.sandboxId), req.params.commentId, !!req.body?.resolved));
+    } catch (err) {
+      if (err instanceof CommentError) throw new HttpError(400, err.message);
+      throw err;
+    }
   })().catch(next);
 });
 
@@ -251,6 +301,7 @@ async function chat(req: Request, res: Response) {
       role: 'user',
       content: prompt,
       attachments: Array.isArray(body.attachments) ? body.attachments.map(String).slice(0, 10) : [],
+      ...(conv.surface === 'design' && parseElementRefs(body.elements).length ? { elements: parseElementRefs(body.elements) } : {}),
       skill,
       createdAt: Date.now(),
     };

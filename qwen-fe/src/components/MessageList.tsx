@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { DESIGN_FILE, type AgentBlock, type Message, type OutputFile, type ToastFn } from '../types';
+import { DESIGN_FILE, elementTitle, type AgentBlock, type Message, type OutputFile, type ToastFn } from '../types';
+import { copyToClipboard } from '../clipboard';
 import { useConfig } from '../config';
 import { useSkills } from '../skills';
 import { FileIcon } from './FileIcon';
@@ -23,30 +24,46 @@ interface Props {
 
 export function MessageList({ messages, openFile, onOpenFile, loading, onRegenerate, onEdit, onDelete, toast, loggedIn }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const lastTop = useRef(0);
   const [showDown, setShowDown] = useState(false);
 
-  const last = messages[messages.length - 1];
-  useEffect(() => {
+  const toBottom = () => {
     const el = scrollRef.current;
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages.length, last?.content, last?.thinking, last?.sources, last?.status]);
+    if (el) el.scrollTop = el.scrollHeight;
+  };
 
+  // Follow anything that grows the conversation (streamed text, tool cards, file cards, images) while stuck.
+  useEffect(() => {
+    const inner = innerRef.current;
+    if (!inner) return;
+    const ro = new ResizeObserver(() => stickRef.current && toBottom());
+    ro.observe(inner);
+    if (scrollRef.current) ro.observe(scrollRef.current);
+    return () => ro.disconnect();
+  }, [loading]);
+
+  // A new message (the user just sent one) always brings the view back to the latest.
   useEffect(() => {
     stickRef.current = true;
+    toBottom();
   }, [messages.length]);
 
   const onScroll = () => {
     const el = scrollRef.current!;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickRef.current = dist < 40;
+    // Content growth never moves scrollTop up, so an upward move is the user scrolling away from the bottom.
+    if (el.scrollTop < lastTop.current - 2) stickRef.current = false;
+    if (dist < 40) stickRef.current = true;
+    lastTop.current = el.scrollTop;
     setShowDown(dist > 160);
   };
 
   return (
     <div className="messages-wrap">
       <div className="messages" ref={scrollRef} onScroll={onScroll}>
-        <div className="messages-inner">
+        <div className="messages-inner" ref={innerRef}>
           {loading ? (
             <div className="msg-loading">
               <div className="skeleton" style={{ width: '36%', marginLeft: 'auto', height: 44, borderRadius: 16 }} />
@@ -64,7 +81,10 @@ export function MessageList({ messages, openFile, onOpenFile, loading, onRegener
       {showDown && (
         <button
           className="float-bottom"
-          onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
+          onClick={() => {
+            stickRef.current = true;
+            scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+          }}
         >
           <Icon name="arrowDown" size={16} />
         </button>
@@ -75,7 +95,7 @@ export function MessageList({ messages, openFile, onOpenFile, loading, onRegener
 
 const copyText = async (text: string, toast: ToastFn) => {
   try {
-    await navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     toast('复制成功', 'success');
   } catch {
     toast('复制失败', 'error');
@@ -111,9 +131,15 @@ const MessageItem = memo(function MessageItem({
     const skill = agentSkill ? { icon: 'component', name: agentSkill.title } : skills.find((s) => s.key === msg.skill);
     return (
       <div className="msg-user">
-        {msg.attachments && msg.attachments.length > 0 && (
+        {((msg.attachments?.length ?? 0) > 0 || (msg.elements?.length ?? 0) > 0) && (
           <div className="attach-list is-right">
-            {msg.attachments.map((f) => (
+            {msg.elements?.map((el) => (
+              <div key={`${el.pageId}|${el.selector}|${el.comment ?? ''}`} className="attach-chip is-element" title={elementTitle(el)}>
+                <Icon name={el.comment ? 'comment' : 'target'} size={14} />
+                <span><em>{el.pageName}</em>{el.name}{el.comment && <i>{el.comment}</i>}</span>
+              </div>
+            ))}
+            {(msg.attachments ?? []).map((f) => (
               <div key={f} className="attach-chip"><Icon name="fileUpload" /><span>{f}</span></div>
             ))}
           </div>
@@ -185,7 +211,7 @@ function AnswerActions({
   };
 
   const share = () =>
-    navigator.clipboard.writeText(`${location.origin}/share/${msg.id}`).then(
+    copyToClipboard(`${location.origin}/share/${msg.id}`).then(
       () => toast('分享链接已复制', 'success'),
       () => toast('分享失败', 'error'),
     );

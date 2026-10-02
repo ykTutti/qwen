@@ -71,6 +71,41 @@ export interface DesignDoc {
 
 export const DESIGN_FILE = 'design.json';
 
+/** A review comment left on a prototype element from the preview page. */
+export interface DesignComment {
+  id: string;
+  pageId: string;
+  pageName: string;
+  html: string;
+  selector: string;
+  elementName: string;
+  content: string;
+  author: string;
+  createdAt: number;
+  /** Set once the comment is marked 完成. */
+  resolvedAt?: number;
+}
+
+/** An element picked on the design canvas and attached to the next message for a targeted tweak. */
+export interface ElementRef {
+  pageId: string;
+  pageName: string;
+  /** The page's HTML file in the work dir. */
+  html: string | null;
+  selector: string;
+  name: string;
+  tag: string;
+  text: string;
+  rect: { x: number; y: number; width: number; height: number };
+  styles: Record<string, string>;
+  /** A review comment on this element (from the comment list), to address in the tweak. */
+  comment?: string;
+}
+
+/** Tooltip for an attached element chip. */
+export const elementTitle = (el: ElementRef) =>
+  `${el.pageName} · ${el.selector}${el.comment ? `\n评论：${el.comment}` : ''}`;
+
 export interface Message {
   id: string;
   role: Role;
@@ -81,6 +116,7 @@ export interface Message {
   blocks?: AgentBlock[];
   files?: OutputFile[];
   attachments?: string[];
+  elements?: ElementRef[];
   skill?: string;
   status?: 'pending' | 'analyzing' | 'streaming' | 'done' | 'stopped';
   createdAt: number;

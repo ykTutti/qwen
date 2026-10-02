@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DESIGN_FILE, isWorkLike, type ChatMode, type Conversation, type DesignDoc, type Message, type OutputFile, type Surface, type ToastFn, type ToastType, type User } from './types';
+import { DESIGN_FILE, isWorkLike, type ChatMode, type Conversation, type DesignDoc, type ElementRef, type Message, type OutputFile, type Surface, type ToastFn, type ToastType, type User } from './types';
 import { api, ApiError, streamChat, tokenStore, type ChatRequest } from './api/client';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -17,6 +17,8 @@ import { useConfig } from './config';
 const TOAST_ICONS: Record<ToastType, string> = { success: 'circleCheck', error: 'attention', info: 'info' };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+const FILE_WRITERS = new Set(['write_file', 'edit_file', 'delete_file']);
+const MAX_ELEMENT_REFS = 5;
 const MOBILE = 750;
 
 function draftTitle(prompt: string) {
@@ -48,6 +50,8 @@ export default function App() {
   const [panel, setPanel] = useState<{ conversationId: string; file: OutputFile } | null>(null);
   /** Latest design.json per conversation, pushed live while the design agent works. */
   const [designs, setDesigns] = useState<Record<string, DesignDoc>>({});
+  /** Canvas elements queued for the next message, per conversation. */
+  const [elementRefs, setElementRefs] = useState<Record<string, ElementRef[]>>({});
   const [skillsOpen, setSkillsOpen] = useState(false);
   const closePanel = useCallback(() => setPanel(null), []);
 
@@ -169,6 +173,7 @@ export default function App() {
 
     let savedSkill = false;
     let canvasOpened = false;
+    let editedFiles = false;
     const finish = () => {
       setStreamingId((cur) => (cur === convId ? null : cur));
       cancelRef.current = null;
@@ -186,14 +191,15 @@ export default function App() {
         onBlocks: (blocks, c) => {
           updateMsg(convId, aid, { blocks, content: c, status: 'streaming' });
           if (blocks.some((b) => b.type === 'tool' && b.name === 'save_skill' && b.status === 'done')) savedSkill = true;
+          if (blocks.some((b) => b.type === 'tool' && FILE_WRITERS.has(b.name) && b.status === 'done')) editedFiles = true;
         },
-        onFiles: (files) => {
-          updateMsg(convId, aid, { files });
+        onFiles: (files, changed) => {
+          if (files.length) updateMsg(convId, aid, { files });
           // Pages edited after they were registered keep their design.json stamp; bump it so their iframes reload.
           setDesigns((prev) => {
             const d = prev[convId];
             if (!d) return prev;
-            const stamps = new Map(files.map((f) => [f.path, f.updatedAt]));
+            const stamps = new Map(changed.map((f) => [f.path, f.updatedAt]));
             const pages = d.pages.map((p) => {
               const t = p.html ? stamps.get(p.html) : undefined;
               return t && t > (p.updatedAt ?? 0) ? { ...p, updatedAt: t } : p;
@@ -212,6 +218,12 @@ export default function App() {
         onDone: () => {
           updateMsg(convId, aid, { status: 'done' });
           if (savedSkill) refreshSkills().catch(() => undefined);
+          // Shared CSS/JS edits (e.g. a targeted tweak) don't change any page's HTML stamp, so reload every page.
+          if (editedFiles && surface === 'design') {
+            const now = Date.now();
+            const bump = (d: DesignDoc): DesignDoc => ({ ...d, pages: d.pages.map((p) => (p.html ? { ...p, updatedAt: now } : p)) });
+            api.design(convId).then((d) => setDesigns((prev) => ({ ...prev, [convId]: bump(prev[convId] ?? d) })), () => undefined);
+          }
           finish();
           if (activeRef.current !== convId) {
             setConversations((prev) => prev.map((c) => (c.id === convId ? { ...c, unread: true } : c)));
@@ -243,10 +255,33 @@ export default function App() {
       setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, updatedAt: Date.now() } : c)));
     }
     const id = convId;
-    const userMsg: Message = { id: `um-${uid()}`, role: 'user', content: text, attachments, skill, createdAt: Date.now() };
+    const elements = elementRefs[id]?.length ? elementRefs[id] : undefined;
+    const userMsg: Message = { id: `um-${uid()}`, role: 'user', content: text, attachments, elements, skill, createdAt: Date.now() };
     setMessagesMap((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), userMsg] }));
-    runAssistant(id, { prompt: text, mode, model: chatModel, skill, attachments, temporary, userMessageId: userMsg.id });
+    runAssistant(id, { prompt: text, mode, model: chatModel, skill, attachments, elements, temporary, userMessageId: userMsg.id });
     setSkill(undefined);
+    if (elements) {
+      setElementRefs((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  };
+
+  const attachElement = (convId: string, ref: ElementRef) => {
+    const list = elementRefs[convId] ?? [];
+    if (list.some((r) => r.pageId === ref.pageId && r.selector === ref.selector && r.comment === ref.comment)) {
+      toast(ref.comment ? '这条评论已经添加到对话了' : '这个元素已经添加到对话了');
+      return;
+    }
+    if (list.length >= MAX_ELEMENT_REFS) {
+      toast(`一次最多添加 ${MAX_ELEMENT_REFS} 个元素`);
+      return;
+    }
+    setElementRefs((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), ref] }));
+    toast(ref.comment ? '评论已添加到对话，发送即可让 AI 按评论修改' : '已添加到对话，描述你想怎么改', 'success');
+    if (activeRef.current === convId) composerRef.current?.focus();
   };
 
   const regenerate = () => {
@@ -357,6 +392,12 @@ export default function App() {
       onMode={setMode}
       onWorkModel={setWorkModel}
       onSkill={pickSkill}
+      elements={activeId ? elementRefs[activeId] : undefined}
+      onRemoveElement={(ref) => {
+        if (!activeId) return;
+        const id = activeId;
+        setElementRefs((prev) => ({ ...prev, [id]: (prev[id] ?? []).filter((r) => r !== ref) }));
+      }}
       onSend={send}
       onStop={stop}
       toast={toast}
@@ -470,6 +511,8 @@ export default function App() {
             conversationId={openPanel.conversationId}
             file={openPanel.file}
             design={designs[openPanel.conversationId]}
+            wide={conversations.find((c) => c.id === openPanel.conversationId)?.surface === 'design'}
+            onAttachElement={(ref) => attachElement(openPanel.conversationId, ref)}
             onClose={closePanel}
             toast={toast}
           />

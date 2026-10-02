@@ -1,4 +1,4 @@
-import type { AgentBlock, AgentSkill, AppConfig, ChatMode, CloudSpaceItem, Conversation, DesignDoc, Message, OutputFile, SearchHit, SearchSource, Surface, User } from '../types';
+import type { AgentBlock, AgentSkill, AppConfig, ChatMode, CloudSpaceItem, Conversation, DesignComment, DesignDoc, ElementRef, Message, OutputFile, SearchHit, SearchSource, Surface, User } from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE ?? '/api';
 const TOKEN_KEY = 'qw-token';
@@ -107,6 +107,24 @@ export const api = {
     return `${BASE}/preview/${await key}/${path.split('/').map(encodeURIComponent).join('/')}`;
   },
   design: (conversationId: string) => request<DesignDoc>(`/conversations/${encodeURIComponent(conversationId)}/design`),
+  /** Writes visual-editor edits into the page's CSS file; an empty value removes the override. */
+  saveDesignStyle: (conversationId: string, body: { page: string; selector: string; styles: Record<string, string> }) =>
+    request<{ file: string }>(`/conversations/${encodeURIComponent(conversationId)}/design/style`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  comments: (conversationId: string) =>
+    request<DesignComment[]>(`/conversations/${encodeURIComponent(conversationId)}/comments`),
+  resolveComment: (conversationId: string, commentId: string, resolved: boolean) =>
+    request<DesignComment>(`/conversations/${encodeURIComponent(conversationId)}/comments/${encodeURIComponent(commentId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ resolved }),
+    }),
+  addComment: (conversationId: string, body: { pageId: string; selector: string; elementName: string; content: string }) =>
+    request<DesignComment>(`/conversations/${encodeURIComponent(conversationId)}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };
 
 const previewKeys = new Map<string, Promise<string>>();
@@ -120,6 +138,7 @@ export interface ChatRequest {
   model: string;
   skill?: string;
   attachments?: string[];
+  elements?: ElementRef[];
   regenerate?: boolean;
   userMessageId?: string;
   assistantMessageId: string;
@@ -132,7 +151,8 @@ export interface ChatHandlers {
   /** Agent answers stream as ordered blocks: reasoning, tool calls with results, and answer text. */
   onBlocks?: (blocks: AgentBlock[], fullText: string) => void;
   /** Files the agent produced this turn, sent once just before `done`. */
-  onFiles?: (files: OutputFile[]) => void;
+  /** `files` get cards under the reply; `changed` is every output file the turn touched (a superset in design mode). */
+  onFiles?: (files: OutputFile[], changed: OutputFile[]) => void;
   onDesign?: (design: DesignDoc) => void;
   onDone: () => void;
   onError: (err: Error) => void;
@@ -184,7 +204,7 @@ export function streamChat(body: ChatRequest, handlers: ChatHandlers) {
           blocks = applyAgentEvent(blocks ?? (content ? [{ type: 'text', text: content }] : []), event, data);
           handlers.onBlocks?.(blocks, content);
         } else if (event === 'files') {
-          handlers.onFiles?.(data.files);
+          handlers.onFiles?.(data.files, data.changed ?? data.files);
         } else if (event === 'design') {
           handlers.onDesign?.(data.design);
         } else if (event === 'error') {

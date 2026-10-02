@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, downloadOutputFile, fetchOutputFile } from '../api/client';
-import { DESIGN_FILE, type DesignDoc, type OutputFile, type ToastFn } from '../types';
+import { previewPath } from './PreviewPage';
+import { DESIGN_FILE, type DesignDoc, type ElementRef, type OutputFile, type ToastFn } from '../types';
 import { FileIcon, isMarkdownFile } from './FileIcon';
 import { Icon } from './Icon';
 import { Markdown, formatSize } from './MessageList';
@@ -13,6 +14,9 @@ interface Props {
   file: OutputFile;
   /** Live design.json pushed during the current session; fetched from the server when absent. */
   design?: DesignDoc;
+  /** Use the canvas width for every file, so switching between the plan and the canvas doesn't resize the panel. */
+  wide?: boolean;
+  onAttachElement?: (ref: ElementRef) => void;
   onClose: () => void;
   toast: ToastFn;
 }
@@ -31,11 +35,14 @@ const kindOf = (file: OutputFile) =>
   : /\.pptx$/i.test(file.name) ? 'pptx'
   : 'other';
 
-export function FilePanel({ conversationId, file, design: live, onClose, toast }: Props) {
+export function FilePanel({ conversationId, file, design: live, wide, onAttachElement, onClose, toast }: Props) {
   const kind = kindOf(file);
   const previewable = kind !== 'other';
   const [state, setState] = useState<State>({ status: 'loading' });
   const [source, setSource] = useState(false);
+  /** Canvas mode; designing and commenting share the canvas's side panel, so only one is on at a time. */
+  const [canvasMode, setCanvasMode] = useState<'design' | 'comment' | null>(null);
+  const toggleMode = (m: 'design' | 'comment') => setCanvasMode((cur) => (cur === m ? null : m));
   const [downloading, setDownloading] = useState(false);
   const hasLive = !!live;
   const design = live ?? (state.status === 'ready' && 'design' in state ? state.design : undefined);
@@ -79,30 +86,50 @@ export function FilePanel({ conversationId, file, design: live, onClose, toast }
   };
 
   return (
-    <aside className={`file-panel ${kind === 'canvas' ? 'is-canvas' : ''}`} aria-label={file.name}>
+    <aside className={`file-panel ${kind === 'canvas' || wide ? 'is-wide' : ''}`} aria-label={file.name}>
       <header className="file-panel-head">
         <span className="file-panel-title" title={file.path}>{kind === 'canvas' ? '设计画布' : file.name}</span>
         <div className="file-panel-actions">
-          {(kind === 'canvas' ? !!design : (kind === 'markdown' || kind === 'html') && state.status === 'ready') && (
+          {kind === 'canvas' && design && (
+            <>
+              <button className={`file-panel-btn ${canvasMode === 'design' ? 'is-on' : ''}`} onClick={() => toggleMode('design')}>
+                <Icon name="pen" size={18} />{canvasMode === 'design' ? '退出设计' : '开始设计'}
+              </button>
+              <button className={`file-panel-btn ${canvasMode === 'comment' ? 'is-on' : ''}`} onClick={() => toggleMode('comment')}>
+                <Icon name="comment" size={18} />评论
+              </button>
+            </>
+          )}
+          {(kind === 'markdown' || kind === 'html') && state.status === 'ready' && (
             <button className="file-panel-btn" onClick={() => setSource((v) => !v)}>
               <Icon name={source ? 'eye' : 'code'} size={18} />{source ? '预览' : '查看源码'}
             </button>
           )}
-          <button className="file-panel-btn" disabled={downloading || (previewable && !design && state.status === 'loading')} onClick={download}>
-            <Icon name={downloading ? 'loading' : 'download'} size={18} className={downloading ? 'spin' : undefined} />下载
-          </button>
+          {kind === 'canvas' ? (
+            <button
+              className="file-panel-btn"
+              disabled={!design?.pages.some((p) => p.html)}
+              onClick={() => window.open(previewPath(conversationId), '_blank')}
+            >
+              <Icon name="eye" size={18} />预览
+            </button>
+          ) : (
+            <button className="file-panel-btn" disabled={downloading || (previewable && !design && state.status === 'loading')} onClick={download}>
+              <Icon name={downloading ? 'loading' : 'download'} size={18} className={downloading ? 'spin' : undefined} />下载
+            </button>
+          )}
           <button className="icon-btn" title="收起" aria-label="收起" onClick={onClose}><Icon name="collapse" size={18} /></button>
         </div>
       </header>
       <div className={`file-panel-body ${kind === 'pptx' ? 'is-deck' : (kind === 'html' || kind === 'canvas') && !source ? 'is-frame' : ''}`}>
         {kind === 'canvas' && design ? (
-          source ? (
-            <div className="file-panel-doc"><pre className="file-panel-source">{JSON.stringify(design, null, 2)}</pre></div>
-          ) : (
-            <Suspense fallback={<div className="file-panel-loading"><Icon name="loading" className="spin" size={28} /></div>}>
-              <DesignCanvas conversationId={conversationId} design={design} />
-            </Suspense>
-          )
+          <Suspense fallback={<div className="file-panel-loading"><Icon name="loading" className="spin" size={28} /></div>}>
+            <DesignCanvas conversationId={conversationId} design={design} 
+              designing={canvasMode === 'design'}
+              commenting={canvasMode === 'comment'}
+              onAttach={onAttachElement}
+            />
+          </Suspense>
         ) : !previewable ? (
           <div className="file-panel-nopreview">
             <FileIcon name={file.name} size={64} />

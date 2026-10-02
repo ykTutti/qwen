@@ -1,7 +1,8 @@
 import { streamCompletion, type LlmMessage, type LlmToolCall, type ModelTarget } from '../llm/client.js';
 import type { Skill } from '../skills.js';
 import { isWorkLike, type AgentBlock, type Message, type Surface } from '../types.js';
-import { readDesign } from './tools/design.js';
+import { describeElements } from '../elementRefs.js';
+import { DESIGN_FILE, readDesign } from './tools/design.js';
 import { describeFile, snapshotOutputs } from './tools/files.js';
 import { toolsFor } from './tools/index.js';
 import { isSandboxed } from './tools/sandbox.js';
@@ -10,6 +11,7 @@ import type { AgentSession } from './tools/types.js';
 const MAX_STEPS: Record<Surface, number> = { daily: 6, work: 30, design: 30 };
 const FINAL_NUDGE = '已达到本轮工具调用上限，请立即基于已获得的信息给出最终回答，不要再调用任何工具。';
 const HISTORY_LIMIT = 20;
+const DESIGN_CARDS = new Set(['规划.md', DESIGN_FILE]);
 
 type ToolBlock = Extract<AgentBlock, { type: 'tool' }>;
 type ReasoningBlock = Extract<AgentBlock, { type: 'reasoning' }>;
@@ -90,6 +92,12 @@ function designPrompt() {
     '- 所有输出都用简体中文，包括调用工具前后的过渡说明（如"先写规划""公共组件已完成，开始并行实现页面"），过渡说明一句话即可。',
     '- run_subagent 用来派发页面：子 agent 与你共享工作区，但看不到对话，prompt 必须自成一体。用户看不到子 agent 的报告，由你汇总后回复。',
     '- 原型尽量不引用外部资源；图片用 CSS 渐变、emoji 或内联 SVG 代替。design.json 会实时渲染成右侧的设计画布（每个页面一个节点，按导航关系连线），生成的文件也会以卡片形式附在回复末尾。',
+    '',
+    '## 针对选中元素微调',
+    '- 用户消息末尾带有「用户在设计画布上选中的元素」时，这是一次针对性微调：不要重新规划、不要派发子 agent，由你直接用 read_file / edit_file 修改对应页面文件（HTML / CSS / JS），改动只限这些元素及必要的关联样式，其他页面和元素保持不变。',
+    '- 先读页面文件，用给出的选择器、文本和当前样式定位元素；元素若来自公共组件（app- 开头的自定义元素渲染出的内容），改 components/ 下的公共组件会影响所有页面，除非用户要求统一修改，否则优先在该页面的 CSS 里加更具体的选择器覆盖。',
+    '- 页面 CSS 末尾可能有 `qw-visual-editor` 标记的区块，是用户在画布上手动调整过的样式（带 !important）。要修改的属性如果在这个区块里，直接改区块里对应的值，否则你的修改不会生效。',
+    '- 修改完不需要重新登记 design.json，画布会自动刷新；回复里简要说明改了什么。',
   ];
 }
 
@@ -116,7 +124,7 @@ function agentToolsPrompt(surface: Surface) {
 export function buildHistory(list: Message[]): LlmMessage[] {
   const out: LlmMessage[] = [];
   for (const m of list.slice(-HISTORY_LIMIT)) {
-    if (m.role === 'user') out.push({ role: 'user', content: m.content });
+    if (m.role === 'user') out.push({ role: 'user', content: m.content + describeElements(m.elements ?? []) });
     else if (traces.has(m.id)) out.push(...traces.get(m.id)!);
     else if (m.content) out.push({ role: 'assistant', content: m.content });
   }
@@ -320,9 +328,12 @@ export async function runAgent(opts: {
       const files = (await Promise.all(changed.map((p) => describeFile(session, p).catch(() => undefined))))
         .filter((f) => !!f)
         .sort((a, b) => a.updatedAt - b.updatedAt);
+      // Design turns only card the plan and the canvas; page HTML is viewed on the canvas. `changed` still lists
+      // every touched file so the canvas can reload pages edited after they were registered.
+      const cards = surface === 'design' ? files.filter((f) => DESIGN_CARDS.has(f.path)) : files;
       if (files.length) {
-        assistant.files = files;
-        emit('files', { files });
+        if (cards.length) assistant.files = cards;
+        emit('files', { files: cards, changed: files });
       }
     }
     console.log(`${tag} end ${signal.aborted ? 'aborted' : 'ok'} ${Date.now() - began}ms`);

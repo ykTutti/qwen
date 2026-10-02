@@ -97,7 +97,7 @@ export async function readDesign(session: AgentSession): Promise<{ design: Desig
 
 /** Sub-agents finish in parallel, so read-modify-write of design.json is serialized per session. */
 const locks = new Map<string, Promise<unknown>>();
-function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+export function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const run = (locks.get(key) ?? Promise.resolve()).catch(() => undefined).then(fn);
   locks.set(key, run);
   void run.finally(() => locks.get(key) === run && locks.delete(key)).catch(() => undefined);

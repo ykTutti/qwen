@@ -4,6 +4,7 @@ import App from './App';
 import { api } from './api/client';
 import { ConfigProvider } from './config';
 import { LogoMark } from './components/Icon';
+import { PreviewPage } from './components/PreviewPage';
 import type { AppConfig } from './types';
 import './styles.css';
 
@@ -40,8 +41,10 @@ function Bootstrap() {
   );
 }
 
+const previewMatch = location.pathname.match(/^\/preview\/([^/]+)\/?$/);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Bootstrap />
+    {previewMatch ? <PreviewPage conversationId={decodeURIComponent(previewMatch[1])} /> : <Bootstrap />}
   </StrictMode>,
 );

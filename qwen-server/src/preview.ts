@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { NextFunction, Request, Response } from 'express';
 import { resolvePath, sessionFor } from './agent/tools/workspace.js';
+import { injectPicker } from './previewPicker.js';
 
 /**
  * Serves a conversation's work dir under /api/preview/<key>/ so multi-file prototypes (pages linking shared
@@ -47,6 +48,7 @@ export function servePreview(req: Request, res: Response, next: NextFunction) {
     // Opaque-origin pages need CORS for module scripts and fetch() of their own files.
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-store');
+    if (/\.html?$/i.test(abs)) return res.type('html').send(injectPicker(await fsp.readFile(abs, 'utf8')));
     res.sendFile(abs);
   })().catch(next);
 }
