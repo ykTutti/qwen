@@ -158,6 +158,30 @@ export interface ChatHandlers {
   onError: (err: Error) => void;
 }
 
+/** How many new characters this tool event added, so a burst is paced by text length rather than event count. */
+function toolChars(event: string, data: { block?: { id?: string; args?: string; output?: string } }, seen: Map<string, number>) {
+  if (event !== 'tool_call') return 1;
+  const id = data.block?.id ?? '';
+  const next = (data.block?.args?.length ?? 0) + (data.block?.output?.length ?? 0);
+  const prev = seen.get(id) ?? 0;
+  seen.set(id, next);
+  return Math.max(1, next - prev);
+}
+
+/** Lets the browser paint before the next slice. The timeout covers a background tab, where animation frames don't run. */
+function nextPaint() {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    requestAnimationFrame(done);
+    setTimeout(done, 50);
+  });
+}
+
 export function streamChat(body: ChatRequest, handlers: ChatHandlers) {
   const ctrl = new AbortController();
 
@@ -177,11 +201,13 @@ export function streamChat(body: ChatRequest, handlers: ChatHandlers) {
     let content = '';
     let blocks: AgentBlock[] | undefined;
     let finished = false;
+    const argChars = new Map<string, number>();
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
       buffer += value;
       let sep: number;
+      let shown = 0;
       while ((sep = buffer.indexOf('\n\n')) >= 0) {
         const raw = buffer.slice(0, sep);
         buffer = buffer.slice(sep + 2);
@@ -196,6 +222,7 @@ export function streamChat(body: ChatRequest, handlers: ChatHandlers) {
         else if (event === 'analyzing') handlers.onAnalyzing(data);
         else if (event === 'delta') {
           content += data.text;
+          shown += data.text?.length ?? 1;
           if (blocks) {
             blocks = applyAgentEvent(blocks, event, data);
             handlers.onBlocks?.(blocks, content);
@@ -203,6 +230,7 @@ export function streamChat(body: ChatRequest, handlers: ChatHandlers) {
         } else if (event === 'reasoning' || event === 'tool_call' || event === 'tool_result') {
           blocks = applyAgentEvent(blocks ?? (content ? [{ type: 'text', text: content }] : []), event, data);
           handlers.onBlocks?.(blocks, content);
+          shown += event === 'reasoning' ? (data.text?.length ?? 1) : toolChars(event, data, argChars);
         } else if (event === 'files') {
           handlers.onFiles?.(data.files, data.changed ?? data.files);
         } else if (event === 'design') {
@@ -213,6 +241,12 @@ export function streamChat(body: ChatRequest, handlers: ChatHandlers) {
         } else if (event === 'done') {
           finished = true;
           handlers.onDone();
+        }
+        // A lagged link delivers many events in one read. Painting them all here
+        // flashes the whole answer; spread that burst across frames instead.
+        if (shown >= 24 && buffer.includes('\n\n')) {
+          shown = 0;
+          await nextPaint();
         }
       }
     }

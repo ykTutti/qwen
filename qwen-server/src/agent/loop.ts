@@ -295,6 +295,9 @@ export async function runAgent(opts: {
           }
         }
         if (reason) finishReason = reason;
+        // One model chunk can carry many deltas. Yielding lets each write leave the socket
+        // before the next one is corked in behind it.
+        await new Promise((resolve) => setImmediate(resolve));
       }
       closeReasoning();
       calls.forEach((_, i) => start(i));

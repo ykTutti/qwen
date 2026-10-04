@@ -312,19 +312,27 @@ async function chat(req: Request, res: Response) {
   ws.messages[conv.id].push(assistant);
   conv.updatedAt = Date.now();
 
+  // Nagle would hold these small writes until an ack comes back, which on a long link
+  // shows up as a stall followed by the whole reply appearing at once.
+  res.socket?.setNoDelay(true);
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  // A proxy that buffers until its first buffer fills, or until the response ends, will
+  // sit on a quiet stream. This comment is ignored by the client and is large enough to flush it.
+  res.write(`:${' '.repeat(8192)}\n\n`);
   let closed = false;
   res.on('close', () => {
     closed = true;
     if (assistant.status !== 'done') assistant.status = 'stopped';
   });
   const send = (event: string, data: unknown) => {
-    if (!closed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (closed) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    res.socket?.uncork();
   };
 
   const target = resolveModel(model);
