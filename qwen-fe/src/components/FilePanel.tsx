@@ -46,6 +46,8 @@ export function FilePanel({ conversationId, file, design: live, wide, onAttachEl
   const [downloading, setDownloading] = useState(false);
   const hasLive = !!live;
   const design = live ?? (state.status === 'ready' && 'design' in state ? state.design : undefined);
+  /** Design and comment edit the finished pages, so both stay disabled until every page has been generated. */
+  const pagesReady = !!design?.pages.length && design.pages.every((p) => p.status === 'done' && !!p.html);
 
   useEffect(() => {
     if (kind === 'other' || (kind === 'canvas' && hasLive)) return;
@@ -66,6 +68,10 @@ export function FilePanel({ conversationId, file, design: live, wide, onAttachEl
     );
     return () => { cancelled = true; };
   }, [conversationId, file.path, file.updatedAt, kind, hasLive]);
+
+  useEffect(() => {
+    if (!pagesReady) setCanvasMode(null);
+  }, [pagesReady]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -92,10 +98,10 @@ export function FilePanel({ conversationId, file, design: live, wide, onAttachEl
         <div className="file-panel-actions">
           {kind === 'canvas' && design && (
             <>
-              <button className={`file-panel-btn ${canvasMode === 'design' ? 'is-on' : ''}`} onClick={() => toggleMode('design')}>
+              <button className={`file-panel-btn ${canvasMode === 'design' ? 'is-on' : ''}`} disabled={!pagesReady} title={pagesReady ? undefined : '页面全部生成后可开始设计'} onClick={() => toggleMode('design')}>
                 <Icon name="pen" size={18} />{canvasMode === 'design' ? '退出设计' : '开始设计'}
               </button>
-              <button className={`file-panel-btn ${canvasMode === 'comment' ? 'is-on' : ''}`} onClick={() => toggleMode('comment')}>
+              <button className={`file-panel-btn ${canvasMode === 'comment' ? 'is-on' : ''}`} disabled={!pagesReady} title={pagesReady ? undefined : '页面全部生成后可评论'} onClick={() => toggleMode('comment')}>
                 <Icon name="comment" size={18} />评论
               </button>
             </>
@@ -108,7 +114,8 @@ export function FilePanel({ conversationId, file, design: live, wide, onAttachEl
           {kind === 'canvas' ? (
             <button
               className="file-panel-btn"
-              disabled={!design?.pages.some((p) => p.html)}
+              disabled={!pagesReady}
+              title={pagesReady ? undefined : '页面全部生成后可预览'}
               onClick={() => window.open(previewPath(conversationId), '_blank')}
             >
               <Icon name="eye" size={18} />预览

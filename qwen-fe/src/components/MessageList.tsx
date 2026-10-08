@@ -18,11 +18,13 @@ interface Props {
   onRegenerate: () => void;
   onEdit: (text: string) => void;
   onDelete: (messageId: string) => void;
+  /** Sends the option the user picked for an askUserQuestion tool call. */
+  onAnswerQuestion: (callId: string, optionId: string) => Promise<void>;
   toast: ToastFn;
   loggedIn: boolean;
 }
 
-export function MessageList({ messages, openFile, onOpenFile, loading, onRegenerate, onEdit, onDelete, toast, loggedIn }: Props) {
+export function MessageList({ messages, openFile, onOpenFile, loading, onRegenerate, onEdit, onDelete, onAnswerQuestion, toast, loggedIn }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -73,7 +75,7 @@ export function MessageList({ messages, openFile, onOpenFile, loading, onRegener
             </div>
           ) : (
             messages.map((m, i) => (
-              <MessageItem key={m.id} msg={m} openFile={openFile} onOpenFile={onOpenFile} isLast={i === messages.length - 1} onRegenerate={onRegenerate} onEdit={onEdit} onDelete={onDelete} toast={toast} loggedIn={loggedIn} />
+              <MessageItem key={m.id} msg={m} openFile={openFile} onOpenFile={onOpenFile} isLast={i === messages.length - 1} onRegenerate={onRegenerate} onEdit={onEdit} onDelete={onDelete} onAnswerQuestion={onAnswerQuestion} toast={toast} loggedIn={loggedIn} />
             ))
           )}
         </div>
@@ -111,7 +113,7 @@ const stripMd = (md: string) =>
     .trim();
 
 const MessageItem = memo(function MessageItem({
-  msg, isLast, openFile, onOpenFile, onRegenerate, onEdit, onDelete, toast, loggedIn,
+  msg, isLast, openFile, onOpenFile, onRegenerate, onEdit, onDelete, onAnswerQuestion, toast, loggedIn,
 }: {
   msg: Message;
   openFile?: string;
@@ -120,6 +122,7 @@ const MessageItem = memo(function MessageItem({
   onRegenerate: () => void;
   onEdit: (text: string) => void;
   onDelete: (messageId: string) => void;
+  onAnswerQuestion: (callId: string, optionId: string) => Promise<void>;
   toast: ToastFn;
   loggedIn: boolean;
 }) {
@@ -161,7 +164,7 @@ const MessageItem = memo(function MessageItem({
   return (
     <div className="msg-assistant">
       {msg.blocks ? (
-        <AgentBlocks msg={msg} toast={toast} />
+        <AgentBlocks msg={msg} toast={toast} onAnswerQuestion={onAnswerQuestion} />
       ) : (
         <>
           <AnalysisBar msg={msg} />
@@ -307,7 +310,7 @@ export function Markdown({ text, streaming, toast }: { text: string; streaming?:
 type ToolBlockData = Extract<AgentBlock, { type: 'tool' }>;
 type ReasoningBlockData = Extract<AgentBlock, { type: 'reasoning' }>;
 
-function AgentBlocks({ msg, toast }: { msg: Message; toast: ToastFn }) {
+function AgentBlocks({ msg, toast, onAnswerQuestion }: { msg: Message; toast: ToastFn; onAnswerQuestion: (callId: string, optionId: string) => Promise<void> }) {
   const blocks = msg.blocks ?? [];
   const live = msg.status === 'pending' || msg.status === 'analyzing' || msg.status === 'streaming';
 
@@ -324,7 +327,7 @@ function AgentBlocks({ msg, toast }: { msg: Message; toast: ToastFn }) {
       {blocks.map((b, i) => {
         const isLast = i === blocks.length - 1;
         if (b.type === 'reasoning') return <ReasoningBlock key={i} block={b} active={live && isLast && !b.endedAt} />;
-        if (b.type === 'tool') return <ToolBlock key={b.id} block={b} />;
+        if (b.type === 'tool') return <ToolBlock key={b.id} block={b} toast={toast} onAnswerQuestion={onAnswerQuestion} />;
         return b.text.trim() ? <Markdown key={i} text={b.text} streaming={live && isLast} toast={toast} /> : null;
       })}
       {live && blocks[blocks.length - 1].type === 'tool' && blocks.every((b) => b.type !== 'tool' || b.status === 'done' || b.status === 'error') && (
@@ -415,20 +418,55 @@ const TOOL_META: Record<string, ToolMeta> = {
   save_skill: { label: '保存技能', icon: 'component', args: ['title', 'name'], pending: '撰写技能说明', running: '保存中' },
   update_design: { label: '登记页面', icon: 'edit', args: ['page_id'], pending: '准备中', running: '登记中' },
   run_subagent: { label: '子 agent', icon: 'connector', args: ['description', 'agent_id'], pending: '撰写任务说明', running: '执行中' },
+  askUserQuestion: { label: '请你选择', icon: 'comment', args: [], pending: '准备问题', running: '等待选择' },
 };
 
-function ToolBlock({ block }: { block: ToolBlockData }) {
+interface AskOption { id: string; label: string }
+
+/** Reads a question and its options out of the tool arguments, accepting either strings or `{ id, label }`. */
+function parseAsk(args: string): { question: string; options: AskOption[] } | undefined {
+  try {
+    const data = JSON.parse(args);
+    const question = typeof data.question === 'string' ? data.question.trim() : '';
+    if (!question || !Array.isArray(data.options)) return undefined;
+    const options: AskOption[] = [];
+    const seen = new Set<string>();
+    for (const item of data.options) {
+      if (options.length >= 6) break;
+      let id = '';
+      let label = '';
+      if (typeof item === 'string') {
+        label = item.trim();
+        id = label;
+      } else if (item && typeof item === 'object') {
+        label = typeof item.label === 'string' ? item.label.trim() : '';
+        id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : label;
+      }
+      if (!label || !id || seen.has(id)) continue;
+      seen.add(id);
+      options.push({ id, label });
+    }
+    return options.length >= 2 ? { question, options } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function ToolBlock({ block, toast, onAnswerQuestion }: { block: ToolBlockData; toast: ToastFn; onAnswerQuestion: (callId: string, optionId: string) => Promise<void> }) {
   const [open, setOpen] = useState(false);
+  const [sending, setSending] = useState<string | null>(null);
   const meta = TOOL_META[block.name];
+  const ask = block.name === 'askUserQuestion' ? parseAsk(block.args) : undefined;
   const chip = (meta?.args ?? []).map((k) => argOf(block.args, k)).find(Boolean) ?? '';
   const count = block.results?.length ?? 0;
-  const busy = block.status === 'pending' || block.status === 'running';
+  const waiting = !!ask && block.status === 'running';
+  const busy = block.status === 'pending' || (block.status === 'running' && !waiting);
   const status =
     block.status === 'pending' ? meta?.pending ?? '准备中'
     : block.status === 'running' ? block.summary ?? meta?.running ?? '执行中'
     : block.status === 'error' ? block.error ?? '执行失败'
     : block.summary ?? (block.name === 'web_search' ? `找到 ${count} 篇资料` : '已完成');
-  const expandable = count > 0 || !!block.output;
+  const expandable = !ask && (count > 0 || !!block.output);
 
   return (
     <div className={`agent-tool is-${block.status}`}>
@@ -451,6 +489,35 @@ function ToolBlock({ block }: { block: ToolBlockData }) {
         </ol>
       )}
       {open && !count && block.output && <pre className="agent-tool-output">{block.output}</pre>}
+      {ask && (
+        <div className="ask-user">
+          <p>{ask.question}</p>
+          <div className="ask-user-options">
+            {ask.options.map((option) => {
+              const chosen = block.status === 'done' && block.summary === option.label;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={chosen ? 'is-chosen' : ''}
+                  disabled={block.status !== 'running' || sending !== null}
+                  onClick={async () => {
+                    setSending(option.id);
+                    try {
+                      await onAnswerQuestion(block.id, option.id);
+                    } catch (err) {
+                      setSending(null);
+                      toast(err instanceof Error ? err.message : '提交失败', 'error');
+                    }
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

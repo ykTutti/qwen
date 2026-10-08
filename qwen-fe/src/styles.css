@@ -608,6 +608,19 @@ a { color: inherit; text-decoration: none; }
 .agent-tool.is-error .agent-tool-status { color: #ff4040; }
 .agent-sources { margin: 4px 0 0 7px; padding-left: 16px; border-left: 1px solid var(--border-input); }
 .agent-sources a { color: var(--text-1); }
+.ask-user {
+  display: flex; flex-direction: column; gap: 10px; margin: 8px 0 0 7px; padding: 12px 14px;
+  border-left: 1px solid var(--border-input);
+}
+.ask-user p { margin: 0; font-size: 14px; line-height: 22px; color: var(--text-1); }
+.ask-user-options { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.ask-user-options button {
+  min-height: 36px; padding: 7px 14px; border: 1px solid var(--border-input); border-radius: 8px;
+  background: #fff; font-size: 14px; line-height: 20px; color: var(--text-1); text-align: left;
+}
+.ask-user-options button:hover:not(:disabled) { border-color: #5458e8; color: #5458e8; }
+.ask-user-options button.is-chosen { background: rgba(110, 114, 255, .12); border-color: transparent; color: #5458e8; }
+.ask-user-options button:disabled:not(.is-chosen) { opacity: .45; cursor: not-allowed; }
 .agent-tool-output {
   max-height: 320px; margin: 4px 0 0 7px; padding: 8px 12px; overflow: auto; border-radius: 8px; background: var(--bg-sidebar);
   font-size: 12px; line-height: 20px; font-family: 'SF Mono', Menlo, Consolas, monospace; color: var(--text-2);
@@ -765,8 +778,8 @@ a { color: inherit; text-decoration: none; }
   font: 12px/18px 'SF Mono', Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .preview-pick {
-  display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 10px;
-  color: var(--text-2); transition: background .15s, color .15s;
+  display: flex; flex-shrink: 0; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 10px;
+  font-size: 14px; color: var(--text-2); transition: background .15s, color .15s;
 }
 .preview-pick:hover:not(:disabled) { background: var(--fill-hover); color: var(--text-1); }
 .preview-pick.is-on, .preview-pick.is-on:hover { background: rgba(79, 70, 229, .12); color: #4f46e5; }

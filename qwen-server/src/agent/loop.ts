@@ -51,7 +51,8 @@ function systemPrompt(surface: Surface, target: ModelTarget, skill?: Skill) {
     '# 回答要求',
     '- 基于搜索结果回答时，综合多个来源，留意信息的发布时间，优先采用最新、权威的来源；结果互相矛盾时说明差异。',
     '- 不要编造数据、链接或来源；搜索不到时如实说明。',
-    '- 使用简体中文和 Markdown，结构清晰、重点突出，不要复述搜索过程。',
+    '- 回复和思考过程都使用简体中文。思考过程（reasoning）不要用英文；专有名词、代码和命令可以保留原文。回复使用 Markdown，结构清晰、重点突出，不要复述搜索过程。',
+    '- 需要用户在几个明确方案里做选择时，调用 askUserQuestion 给出 2～6 个选项，等用户点选后再继续；一次只问一个问题，不要在回复里再列一遍选项。开放式问题或可以合理假设的细节不要问。',
     ...(surface === 'design' ? designPrompt() : []),
     ...(surface === 'work' ? workPrompt() : []),
     ...(isWorkLike(surface) ? agentToolsPrompt(surface) : []),
@@ -85,11 +86,11 @@ function designPrompt() {
     '- 每个方向说清：核心概念（一句话）、目标用户与场景、关键体验或亮点、主要风险或取舍。可以用表格横向对比。',
     '- 适当用类比、反向思考、极端场景、跨行业借鉴等方法打开思路，标出你最推荐的方向和理由。',
     '- 最后给出收敛建议：下一步先验证什么、选哪个方向做原型。',
-    '- 关键信息缺失（目标用户、平台、核心目标）时，用一条消息问清楚，最多 3 个问题；信息足够就开始落地。',
+    '- 关键取舍还没定（例如移动端还是桌面端、选哪个方向做原型）时，调用 askUserQuestion 让用户点选，一次一个问题，选定后再继续。能合理假设的细节不要问，信息足够就开始落地。',
     '',
     '## 落地原型',
     '- 设计内容明确后，严格按照下文「设计」技能的流程落地：先 web_search 了解相关产品和行业信息，再写规划.md 与 design.json 骨架 → 公共组件 → 并行派发子 agent 实现页面并登记 → 验收 → 回复。写规划之前必须至少搜索一次，不要直接写文件。',
-    '- 所有输出都用简体中文，包括调用工具前后的过渡说明（如"先查一下同类产品""公共组件已完成，开始并行实现页面"），过渡说明一句话即可。',
+    '- 所有输出都用简体中文，包括思考过程和调用工具前后的过渡说明（如"先查一下同类产品""公共组件已完成，开始并行实现页面"），过渡说明一句话即可。',
     '- run_subagent 用来派发页面：子 agent 与你共享工作区，但看不到对话，prompt 必须自成一体。用户看不到子 agent 的报告，由你汇总后回复。',
     '- 原型尽量不引用外部资源；图片用 CSS 渐变、emoji 或内联 SVG 代替。design.json 会实时渲染成右侧的设计画布（每个页面一个节点，按导航关系连线），生成的文件也会以卡片形式附在回复末尾。',
     '',
@@ -153,6 +154,8 @@ export async function runAgent(opts: {
   history: LlmMessage[];
   surface: Surface;
   target: ModelTarget;
+  /** Conversation the turn belongs to; askUserQuestion matches the user's click against it. */
+  conversationId: string;
   /** Per-conversation sandbox for the local file and shell tools; only present in work mode. */
   session?: AgentSession;
   /** Skill the user enabled in this conversation; its instructions go into the system prompt. */
@@ -161,7 +164,7 @@ export async function runAgent(opts: {
   signal: AbortSignal;
   emit: AgentEmit;
 }) {
-  const { assistant, history, surface, target, session, skill, thinking, signal, emit } = opts;
+  const { assistant, history, surface, target, conversationId, session, skill, thinking, signal, emit } = opts;
   const tag = `[agent ${assistant.id.slice(-8)}]`;
   const began = Date.now();
   const lastUser = [...history].reverse().find((m) => m.role === 'user');
@@ -228,7 +231,7 @@ export async function runAgent(opts: {
         if (update.output !== undefined) block.output = update.output;
         emit('tool_call', { block });
       };
-      const out = await tool.execute(args, { signal, session, progress, changed: syncDesign, model: target });
+      const out = await tool.execute(args, { signal, conversationId, callId: block.id, session, progress, changed: syncDesign, model: target });
       block.status = 'done';
       block.results = out.sources;
       block.summary = out.summary;

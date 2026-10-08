@@ -83,6 +83,8 @@ export interface Conversation {
   temporary?: boolean;
   /** Server-generated id of this conversation's agent sandbox (work dir + container); never sent to the client. */
   sandboxId?: string;
+  /** Token of the public preview link, issued the first time the owner shares; never sent in the conversation list. */
+  shareToken?: string;
 }
 
 export interface Skill {

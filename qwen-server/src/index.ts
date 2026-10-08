@@ -1,9 +1,11 @@
 import { env } from './env.js';
+import { randomBytes } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 import { appConfig, mockSources } from './data/config.js';
-import { getWorkspace, guestOwner, login, logout, newId, userByToken, type Workspace } from './store.js';
+import { getWorkspace, guestOwner, login, logout, newId, sharedConversation, userByToken, type Workspace } from './store.js';
 import { buildHistory, forgetTrace, runAgent } from './agent/loop.js';
+import { submitAnswer } from './agent/tools/askUser.js';
 import { readDesign } from './agent/tools/design.js';
 import { applyDesignStyle, StyleError } from './designStyle.js';
 import { parseElementRefs } from './elementRefs.js';
@@ -64,7 +66,13 @@ function findConv(ws: Workspace, id: string) {
   return conv;
 }
 
-const publicConv = ({ temporary: _t, sandboxId: _s, ...c }: Conversation) => c;
+function findShared(token: string) {
+  const conv = sharedConversation(token);
+  if (!conv) throw new HttpError(404, '分享链接无效或已失效');
+  return conv;
+}
+
+const publicConv = ({ temporary: _t, sandboxId: _s, shareToken: _k, ...c }: Conversation) => c;
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
@@ -123,13 +131,67 @@ app.get('/api/conversations/:id/files', (req, res, next) => {
   })().catch(next);
 });
 
-app.get('/api/conversations/:id/design', (req, res, next) => {
-  (async () => {
-    const conv = findConv(req.ws, req.params.id);
-    const current = conv.sandboxId ? await readDesign(sessionFor(conv.sandboxId)) : undefined;
-    if (!current) throw new HttpError(404, '还没有设计画布');
-    res.json(current.design);
-  })().catch(next);
+// The prototype preview is reachable by the owner and through a share link, so its routes are mounted twice.
+const previewScopes: [string, (req: Request) => Conversation][] = [
+  ['/api/conversations/:id', (req) => findConv(req.ws, req.params.id)],
+  ['/api/shares/:token', (req) => findShared(req.params.token)],
+];
+
+for (const [prefix, resolve] of previewScopes) {
+  app.get(`${prefix}/design`, (req, res, next) => {
+    (async () => {
+      const conv = resolve(req);
+      const current = conv.sandboxId ? await readDesign(sessionFor(conv.sandboxId)) : undefined;
+      if (!current) throw new HttpError(404, '还没有设计画布');
+      res.json(current.design);
+    })().catch(next);
+  });
+
+  app.get(`${prefix}/comments`, (req, res, next) => {
+    (async () => {
+      const conv = resolve(req);
+      res.json(conv.sandboxId ? await listComments(sessionFor(conv.sandboxId)) : []);
+    })().catch(next);
+  });
+
+  app.post(`${prefix}/comments`, (req, res, next) => {
+    (async () => {
+      const conv = resolve(req);
+      if (!conv.sandboxId) throw new HttpError(404, '还没有设计画布');
+      try {
+        res.json(await addComment(sessionFor(conv.sandboxId), req.body ?? {}, req.user?.name ?? '游客'));
+      } catch (err) {
+        if (err instanceof CommentError) throw new HttpError(400, err.message);
+        throw err;
+      }
+    })().catch(next);
+  });
+
+  app.patch(`${prefix}/comments/:commentId`, (req, res, next) => {
+    (async () => {
+      const conv = resolve(req);
+      if (!conv.sandboxId) throw new HttpError(404, '评论不存在');
+      try {
+        res.json(await setCommentResolved(sessionFor(conv.sandboxId), req.params.commentId, !!req.body?.resolved));
+      } catch (err) {
+        if (err instanceof CommentError) throw new HttpError(400, err.message);
+        throw err;
+      }
+    })().catch(next);
+  });
+
+  app.get(`${prefix}/preview`, (req, res) => {
+    const conv = resolve(req);
+    if (!conv.sandboxId) throw new HttpError(404, '对话没有工作区');
+    res.json({ key: previewKey(conv.sandboxId) });
+  });
+}
+
+app.post('/api/conversations/:id/share', (req, res) => {
+  const conv = findConv(req.ws, req.params.id);
+  if (!conv.sandboxId) throw new HttpError(404, '还没有设计画布');
+  conv.shareToken ??= randomBytes(16).toString('hex');
+  res.json({ token: conv.shareToken });
 });
 
 app.post('/api/conversations/:id/design/style', (req, res, next) => {
@@ -144,45 +206,6 @@ app.post('/api/conversations/:id/design/style', (req, res, next) => {
       throw err;
     }
   })().catch(next);
-});
-
-app.get('/api/conversations/:id/comments', (req, res, next) => {
-  (async () => {
-    const conv = findConv(req.ws, req.params.id);
-    res.json(conv.sandboxId ? await listComments(sessionFor(conv.sandboxId)) : []);
-  })().catch(next);
-});
-
-app.post('/api/conversations/:id/comments', (req, res, next) => {
-  (async () => {
-    const conv = findConv(req.ws, req.params.id);
-    if (!conv.sandboxId) throw new HttpError(404, '还没有设计画布');
-    try {
-      res.json(await addComment(sessionFor(conv.sandboxId), req.body ?? {}, req.user?.name ?? '游客'));
-    } catch (err) {
-      if (err instanceof CommentError) throw new HttpError(400, err.message);
-      throw err;
-    }
-  })().catch(next);
-});
-
-app.patch('/api/conversations/:id/comments/:commentId', (req, res, next) => {
-  (async () => {
-    const conv = findConv(req.ws, req.params.id);
-    if (!conv.sandboxId) throw new HttpError(404, '评论不存在');
-    try {
-      res.json(await setCommentResolved(sessionFor(conv.sandboxId), req.params.commentId, !!req.body?.resolved));
-    } catch (err) {
-      if (err instanceof CommentError) throw new HttpError(400, err.message);
-      throw err;
-    }
-  })().catch(next);
-});
-
-app.get('/api/conversations/:id/preview', (req, res) => {
-  const conv = findConv(req.ws, req.params.id);
-  if (!conv.sandboxId) throw new HttpError(404, '对话没有工作区');
-  res.json({ key: previewKey(conv.sandboxId) });
 });
 
 app.get('/api/conversations/:id/files/download', (req, res, next) => {
@@ -253,6 +276,17 @@ app.get('/api/search', (req, res) => {
     return conv.title.toLowerCase().includes(k) || snippet ? [{ conversation: publicConv(conv), snippet }] : [];
   });
   res.json(hits);
+});
+
+app.post('/api/conversations/:id/questions/:callId', (req, res) => {
+  const conv = findConv(req.ws, req.params.id);
+  const optionId = String(req.body?.optionId ?? '').trim();
+  if (!optionId) throw new HttpError(400, '请选择一个选项');
+  try {
+    res.json(submitAnswer(conv.id, req.params.callId, optionId));
+  } catch (err) {
+    throw new HttpError(400, err instanceof Error ? err.message : '回答失败');
+  }
 });
 
 app.post('/api/chat', (req, res, next) => {
@@ -353,6 +387,7 @@ async function chat(req: Request, res: Response) {
         assistant,
         history: buildHistory(ws.messages[conv.id].slice(0, -1)),
         surface: conv.surface,
+        conversationId: conv.id,
         target,
         session: conv.sandboxId ? sessionFor(conv.sandboxId) : undefined,
         skill: agentSkill,

@@ -473,6 +473,7 @@ export default function App() {
                 onRegenerate={regenerate}
                 onEdit={(t) => composerRef.current?.setText(t)}
                 onDelete={deleteMessage}
+                onAnswerQuestion={(callId, optionId) => api.answerQuestion(activeId!, callId, optionId).then(() => undefined)}
                 toast={toast}
                 loggedIn={loggedIn}
               />

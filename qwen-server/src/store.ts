@@ -36,6 +36,16 @@ export function getWorkspace(owner: string): Workspace {
   return ws;
 }
 
+/** Conversation behind a share link, in whichever workspace it lives now (a guest's conversations move on login). */
+export function sharedConversation(token: string): Conversation | undefined {
+  if (!token) return undefined;
+  for (const ws of workspaces.values()) {
+    const conv = ws.conversations.find((c) => c.shareToken === token);
+    if (conv) return conv;
+  }
+  return undefined;
+}
+
 export function login(account: string, clientId?: string) {
   let user = users.get(account);
   if (!user) {

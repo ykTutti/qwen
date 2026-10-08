@@ -20,6 +20,10 @@ export interface AgentSession {
 
 export interface ToolContext {
   signal: AbortSignal;
+  /** Conversation this tool call belongs to. askUserQuestion uses it to match the user's answer. */
+  conversationId?: string;
+  /** Id of this tool call. askUserQuestion uses it to match the user's answer. */
+  callId?: string;
   session?: AgentSession;
   /** Live status for long-running tools; updates the tool's card while it is still running. */
   progress?: (update: { summary?: string; output?: string }) => void;

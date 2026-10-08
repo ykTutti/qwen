@@ -97,37 +97,55 @@ export const api = {
       `/conversations/${encodeURIComponent(conversationId)}/files?path=${encodeURIComponent(path)}`,
     ),
   /** URL serving a work-dir file so relative links (shared CSS/JS, other pages) resolve inside the preview iframe. */
-  previewUrl: async (conversationId: string, path: string) => {
-    let key = previewKeys.get(conversationId);
-    if (!key) {
-      key = request<{ key: string }>(`/conversations/${encodeURIComponent(conversationId)}/preview`).then((d) => d.key);
-      previewKeys.set(conversationId, key);
-      key.catch(() => previewKeys.delete(conversationId));
-    }
-    return `${BASE}/preview/${await key}/${path.split('/').map(encodeURIComponent).join('/')}`;
-  },
-  design: (conversationId: string) => request<DesignDoc>(`/conversations/${encodeURIComponent(conversationId)}/design`),
+  previewUrl: (conversationId: string, path: string) => previewApi(conversationScope(conversationId)).url(path),
+  design: (conversationId: string) => previewApi(conversationScope(conversationId)).design(),
+  /** Issues (or returns the existing) token for the public preview link. */
+  share: (conversationId: string) =>
+    request<{ token: string }>(`/conversations/${encodeURIComponent(conversationId)}/share`, { method: 'POST' }),
   /** Writes visual-editor edits into the page's CSS file; an empty value removes the override. */
   saveDesignStyle: (conversationId: string, body: { page: string; selector: string; styles: Record<string, string> }) =>
     request<{ file: string }>(`/conversations/${encodeURIComponent(conversationId)}/design/style`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  comments: (conversationId: string) =>
-    request<DesignComment[]>(`/conversations/${encodeURIComponent(conversationId)}/comments`),
-  resolveComment: (conversationId: string, commentId: string, resolved: boolean) =>
-    request<DesignComment>(`/conversations/${encodeURIComponent(conversationId)}/comments/${encodeURIComponent(commentId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ resolved }),
-    }),
-  addComment: (conversationId: string, body: { pageId: string; selector: string; elementName: string; content: string }) =>
-    request<DesignComment>(`/conversations/${encodeURIComponent(conversationId)}/comments`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+  comments: (conversationId: string) => previewApi(conversationScope(conversationId)).comments(),
+  answerQuestion: (conversationId: string, callId: string, optionId: string) =>
+    request<{ id: string; label: string }>(
+      `/conversations/${encodeURIComponent(conversationId)}/questions/${encodeURIComponent(callId)}`,
+      { method: 'POST', body: JSON.stringify({ optionId }) },
+    ),
 };
 
 const previewKeys = new Map<string, Promise<string>>();
+
+/** API path of a design reached by its owner. */
+export const conversationScope = (conversationId: string) => `/conversations/${encodeURIComponent(conversationId)}`;
+/** API path of a design reached through a share link, which works for any visitor. */
+export const shareScope = (token: string) => `/shares/${encodeURIComponent(token)}`;
+
+/** Prototype preview calls, the same for the owner's conversation and a share link. */
+export function previewApi(scope: string) {
+  return {
+    design: () => request<DesignDoc>(`${scope}/design`),
+    url: async (path: string) => {
+      let key = previewKeys.get(scope);
+      if (!key) {
+        key = request<{ key: string }>(`${scope}/preview`).then((d) => d.key);
+        previewKeys.set(scope, key);
+        key.catch(() => previewKeys.delete(scope));
+      }
+      return `${BASE}/preview/${await key}/${path.split('/').map(encodeURIComponent).join('/')}`;
+    },
+    comments: () => request<DesignComment[]>(`${scope}/comments`),
+    addComment: (body: { pageId: string; selector: string; elementName: string; content: string }) =>
+      request<DesignComment>(`${scope}/comments`, { method: 'POST', body: JSON.stringify(body) }),
+    resolveComment: (commentId: string, resolved: boolean) =>
+      request<DesignComment>(`${scope}/comments/${encodeURIComponent(commentId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ resolved }),
+      }),
+  };
+}
 
 export interface ChatRequest {
   conversationId: string;

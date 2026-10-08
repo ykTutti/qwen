@@ -41,10 +41,16 @@ function Bootstrap() {
   );
 }
 
+const sharedMatch = location.pathname.match(/^\/preview\/s\/([^/]+)\/?$/);
 const previewMatch = location.pathname.match(/^\/preview\/([^/]+)\/?$/);
+const previewTarget = sharedMatch
+  ? { share: decodeURIComponent(sharedMatch[1]) }
+  : previewMatch
+    ? { conversationId: decodeURIComponent(previewMatch[1]) }
+    : null;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {previewMatch ? <PreviewPage conversationId={decodeURIComponent(previewMatch[1])} /> : <Bootstrap />}
+    {previewTarget ? <PreviewPage target={previewTarget} /> : <Bootstrap />}
   </StrictMode>,
 );

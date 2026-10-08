@@ -1,12 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../api/client';
+import { api, conversationScope, previewApi, shareScope } from '../api/client';
 import { copyToClipboard } from '../clipboard';
 import type { DesignComment, DesignDoc } from '../types';
 import { CommentList, toThreads, type ThreadKey } from './CommentList';
 import { Icon, LogoMark } from './Icon';
 
-/** Path of the standalone prototype preview for a design conversation. */
+/** Path of the standalone prototype preview for a design conversation; only its owner can open it. */
 export const previewPath = (conversationId: string) => `/preview/${encodeURIComponent(conversationId)}`;
+/** Path of the public preview behind a share link. */
+export const sharedPreviewPath = (token: string) => `/preview/s/${encodeURIComponent(token)}`;
+
+/** The owner opens a preview by conversation id; everyone else comes in through a share token. */
+export type PreviewTarget = { conversationId: string } | { share: string };
 
 type State =
   | { status: 'loading' }
@@ -22,15 +27,31 @@ const decode = (path: string) => {
 };
 
 /** Full-page preview of a design prototype, starting from its entry page (the first page in design.json). */
-export function PreviewPage({ conversationId }: { conversationId: string }) {
+export function PreviewPage({ target }: { target: PreviewTarget }) {
+  const owner = 'conversationId' in target ? target.conversationId : null;
+  const scope = owner ? conversationScope(owner) : shareScope((target as { share: string }).share);
+  const remote = useMemo(() => previewApi(scope), [scope]);
   const [state, setState] = useState<State>({ status: 'loading' });
   const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [shared, setShared] = useState<'ok' | 'fail' | null>(null);
   const sharedTimer = useRef<number>();
 
+  const [shareLink, setShareLink] = useState<string | null>(owner ? null : location.href);
+
+  useEffect(() => {
+    if (!owner) return;
+    let cancelled = false;
+    api.share(owner).then(
+      ({ token }) => !cancelled && setShareLink(`${location.origin}${sharedPreviewPath(token)}`),
+      () => undefined,
+    );
+    return () => { cancelled = true; };
+  }, [owner]);
+
   const share = () => {
-    copyToClipboard(location.href).then(
+    if (!shareLink) return;
+    copyToClipboard(shareLink).then(
       () => setShared('ok'),
       () => setShared('fail'),
     );
@@ -60,8 +81,8 @@ export function PreviewPage({ conversationId }: { conversationId: string }) {
 
   const threads = useMemo(() => toThreads(comments), [comments]);
 
-  const latest = useRef({ picking, threads, design, conversationId });
-  latest.current = { picking, threads, design, conversationId };
+  const latest = useRef({ picking, threads, design, remote });
+  latest.current = { picking, threads, design, remote };
 
   const syncFrame = () => {
     post({ type: 'qw-picker', on: latest.current.picking, attach: false, comment: true });
@@ -80,9 +101,9 @@ export function PreviewPage({ conversationId }: { conversationId: string }) {
   useEffect(() => {
     if (!design) return;
     let cancelled = false;
-    api.comments(conversationId).then((list) => !cancelled && setComments(list), () => {});
+    remote.comments().then((list) => !cancelled && setComments(list), () => {});
     return () => { cancelled = true; };
-  }, [conversationId, design, picking]);
+  }, [remote, design, picking]);
 
   useEffect(() => {
     const pageFor = (path: string) => latest.current.design?.pages.find((p) => p.html && decode(path).endsWith(`/${p.html}`));
@@ -91,7 +112,7 @@ export function PreviewPage({ conversationId }: { conversationId: string }) {
       try {
         const page = pageFor(path);
         if (!page) throw new Error('找不到当前页面，无法评论');
-        const comment = await api.addComment(latest.current.conversationId, {
+        const comment = await latest.current.remote.addComment({
           pageId: page.id,
           selector: element.selector,
           elementName: element.name,
@@ -150,7 +171,7 @@ export function PreviewPage({ conversationId }: { conversationId: string }) {
     pendingFocus.current = { html: c.html, selector: c.selector };
     let url: string;
     try {
-      url = await api.previewUrl(conversationId, c.html);
+      url = await remote.url(c.html);
     } catch {
       pendingFocus.current = null;
       return;
@@ -175,7 +196,7 @@ export function PreviewPage({ conversationId }: { conversationId: string }) {
     const patch = (resolvedAt: number | undefined) =>
       setComments((list) => list.map((x) => (x.id === c.id ? { ...x, resolvedAt } : x)));
     patch(resolved ? Date.now() : undefined);
-    api.resolveComment(conversationId, c.id, resolved).then(
+    remote.resolveComment(c.id, resolved).then(
       (saved) => patch(saved.resolvedAt),
       () => patch(c.resolvedAt),
     );
@@ -184,14 +205,14 @@ export function PreviewPage({ conversationId }: { conversationId: string }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const design = await api.design(conversationId);
+      const design = await remote.design();
       const entry = design.pages.find((p) => p.html);
       if (!entry?.html) throw new Error('原型还没有生成好的页面');
-      const url = await api.previewUrl(conversationId, entry.html);
+      const url = await remote.url(entry.html);
       if (!cancelled) setState({ status: 'ready', design, url });
     })().catch((err: Error) => !cancelled && setState({ status: 'error', message: err.message || '加载预览失败' }));
     return () => { cancelled = true; };
-  }, [conversationId]);
+  }, [remote]);
 
   useEffect(() => {
     document.title = design ? `${design.title} · 原型预览` : '原型预览';
@@ -225,14 +246,14 @@ export function PreviewPage({ conversationId }: { conversationId: string }) {
         <button
           className={`preview-pick ${picking ? 'is-on' : ''}`}
           disabled={!design}
-          title={picking ? '退出选择元素' : '选择元素'}
-          aria-label="选择元素"
+          title={picking ? '退出标注' : '在页面上标注并评论'}
+          aria-label={picking ? '退出标注' : '标注'}
           aria-pressed={picking}
           onClick={() => setPicking((v) => !v)}
         >
-          <Icon name="target" size={18} />
+          <Icon name="target" size={18} />{picking ? '退出标注' : '标注'}
         </button>
-        <button className={`preview-share ${shared === 'ok' ? 'is-done' : ''}`} disabled={!design} onClick={share}>
+        <button className={`preview-share ${shared === 'ok' ? 'is-done' : ''}`} disabled={!design || !shareLink} onClick={share}>
           <Icon name={shared === 'ok' ? 'check' : 'share'} size={16} />
           {shared === 'ok' ? '链接已复制' : shared === 'fail' ? '复制失败，请重试' : '分享'}
         </button>
